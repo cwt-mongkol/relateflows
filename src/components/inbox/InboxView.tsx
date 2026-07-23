@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
-import { MessageCircle, User, CheckCircle2, ArrowRight, Globe } from 'lucide-react';
+import { MessageCircle, User, CheckCircle2, ArrowRight, Globe, Package, Plus, X, Edit3, Save, Trash2 } from 'lucide-react';
+import type { ProductFormData, ProductStatus } from '../../types/crm';
 
 const CHANNEL_ICONS: Record<string, React.ReactNode> = {
   facebook: <Globe className="w-4 h-4 text-blue-600" />,
@@ -14,8 +15,22 @@ const CHANNEL_LABELS: Record<string, string> = {
   line: 'LINE',
 };
 
+const STATUS_BADGES: Record<ProductStatus, { label: string; class: string }> = {
+  pending: { label: 'Pending', class: 'bg-amber-50 text-amber-700 border-amber-200' },
+  quoted: { label: 'Quoted', class: 'bg-blue-50 text-blue-700 border-blue-200' },
+  ordered: { label: 'Ordered', class: 'bg-purple-50 text-purple-700 border-purple-200' },
+  delivered: { label: 'Delivered', class: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+};
+
+const EMPTY_PRODUCT_FORM: ProductFormData = { leadId: '', name: '', quantity: 1, price: 0, description: '', notes: '', status: 'pending' };
+
 export const InboxView: React.FC = () => {
-  const { isLoading, leads, chatMessages, selectedLead, setSelectedLead, allocateLead } = useCRM();
+  const { isLoading, leads, chatMessages, selectedLead, setSelectedLead, allocateLead, products, addProduct, updateProduct, deleteProduct } = useCRM();
+
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [productForm, setProductForm] = useState<ProductFormData>(EMPTY_PRODUCT_FORM);
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<Partial<ProductFormData>>({});
 
   const leadChats = leads.map((lead) => {
     const msgs = chatMessages.filter((m) => m.leadId === lead.id);
@@ -26,7 +41,40 @@ export const InboxView: React.FC = () => {
     ? chatMessages.filter((m) => m.leadId === selectedLead.id)
     : [];
 
+  const leadProducts = selectedLead
+    ? products.filter((p) => p.leadId === selectedLead.id)
+    : [];
+
   const unreadTotal = leads.reduce((sum, l) => sum + l.unreadCount, 0);
+
+  const resetForm = () => {
+    setProductForm(EMPTY_PRODUCT_FORM);
+    setShowAddProduct(false);
+  };
+
+  const handleAddProduct = async () => {
+    if (!productForm.name.trim() || !selectedLead) return;
+    await addProduct({ ...productForm, leadId: selectedLead.id });
+    resetForm();
+  };
+
+  const startEdit = (product: typeof products[0]) => {
+    setEditingProductId(product.id);
+    setEditValues({ name: product.name, quantity: product.quantity, price: product.price, description: product.description, notes: product.notes, status: product.status });
+  };
+
+  const handleUpdate = async (id: number) => {
+    if (!editValues.name?.trim()) return;
+    await updateProduct(id, editValues);
+    setEditingProductId(null);
+    setEditValues({});
+  };
+
+  const handleStatusChange = async (id: number, status: ProductStatus) => {
+    await updateProduct(id, { status });
+  };
+
+  const totalValue = leadProducts.reduce((sum, p) => sum + p.price * p.quantity, 0);
 
   if (isLoading) {
     return (
@@ -88,10 +136,11 @@ export const InboxView: React.FC = () => {
         </div>
       </div>
 
-      {/* Chat Thread */}
-      <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-        {selectedLead ? (
-          <>
+      {/* Chat Thread + Products Panel */}
+      {selectedLead ? (
+        <>
+          {/* Chat Thread */}
+          <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
             {/* Chat Header */}
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -158,15 +207,198 @@ export const InboxView: React.FC = () => {
                 </button>
               </div>
             </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
-            <MessageCircle className="w-12 h-12 stroke-[1.5]" />
-            <p className="text-sm font-medium">Select a conversation</p>
-            <p className="text-xs">Choose a lead from the left to view messages</p>
           </div>
-        )}
-      </div>
+
+          {/* Products Panel */}
+          <div className="w-80 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-slate-100">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <Package className="w-4 h-4 text-blue-600" />
+                  Products
+                </h3>
+                <button
+                  onClick={() => setShowAddProduct(true)}
+                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-all"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">{leadProducts.length} items &middot; ${totalValue.toLocaleString()}</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+              {/* Add Product Form */}
+              {showAddProduct && (
+                <div className="p-3 bg-blue-50/50 border-b border-blue-100 space-y-2">
+                  <input
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                    placeholder="Product name"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      value={productForm.quantity}
+                      onChange={(e) => setProductForm({ ...productForm, quantity: parseInt(e.target.value) || 1 })}
+                      placeholder="Qty"
+                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      type="number"
+                      value={productForm.price}
+                      onChange={(e) => setProductForm({ ...productForm, price: parseFloat(e.target.value) || 0 })}
+                      placeholder="Price"
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <input
+                    value={productForm.description}
+                    onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                    placeholder="Description"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <textarea
+                    value={productForm.notes}
+                    onChange={(e) => setProductForm({ ...productForm, notes: e.target.value })}
+                    placeholder="Notes"
+                    rows={2}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={handleAddProduct} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold py-1.5 rounded-lg transition-all">
+                      Save
+                    </button>
+                    <button onClick={resetForm} className="px-3 text-[10px] font-bold text-slate-500 hover:text-slate-700 py-1.5 transition-all">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Product List */}
+              {leadProducts.length === 0 && !showAddProduct && (
+                <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+                  <Package className="w-8 h-8 stroke-[1.5]" />
+                  <p className="text-xs font-medium">No products yet</p>
+                  <p className="text-[10px]">Click "Add" to record what this customer wants</p>
+                </div>
+              )}
+
+              {leadProducts.map((product) => {
+                const isEditing = editingProductId === product.id;
+                return (
+                  <div key={product.id} className="p-3 hover:bg-slate-50 transition-all">
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <input
+                          value={editValues.name || ''}
+                          onChange={(e) => setEditValues({ ...editValues, name: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            value={editValues.quantity || 1}
+                            onChange={(e) => setEditValues({ ...editValues, quantity: parseInt(e.target.value) || 1 })}
+                            className="w-14 bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <input
+                            type="number"
+                            value={editValues.price || 0}
+                            onChange={(e) => setEditValues({ ...editValues, price: parseFloat(e.target.value) || 0 })}
+                            className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <textarea
+                          value={editValues.description || ''}
+                          onChange={(e) => setEditValues({ ...editValues, description: e.target.value })}
+                          rows={1}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <textarea
+                          value={editValues.notes || ''}
+                          onChange={(e) => setEditValues({ ...editValues, notes: e.target.value })}
+                          rows={1}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={() => handleUpdate(product.id)} className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all">
+                            <Save className="w-3 h-3" /> Save
+                          </button>
+                          <button onClick={() => setEditingProductId(null)} className="text-[10px] font-bold text-slate-500 hover:text-slate-700 px-2 py-1">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-xs font-bold text-slate-900 truncate">{product.name}</h4>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {product.quantity}x &middot; ${product.price.toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button onClick={() => startEdit(product)} className="text-slate-400 hover:text-blue-600 transition-all p-0.5">
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => deleteProduct(product.id)} className="text-slate-400 hover:text-red-500 transition-all p-0.5">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {product.description && (
+                          <p className="text-[10px] text-slate-600 mt-1 line-clamp-1">{product.description}</p>
+                        )}
+                        {product.notes && (
+                          <p className="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 mt-1 line-clamp-1">{product.notes}</p>
+                        )}
+
+                        <div className="flex items-center gap-1.5 mt-2">
+                          {(['pending', 'quoted', 'ordered', 'delivered'] as ProductStatus[]).map((s) => {
+                            const b = STATUS_BADGES[s];
+                            return (
+                              <button
+                                key={s}
+                                onClick={() => handleStatusChange(product.id, s)}
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${
+                                  product.status === s
+                                    ? b.class + ' ring-1 ring-offset-1 ring-slate-300'
+                                    : 'text-slate-400 border-transparent hover:text-slate-600'
+                                }`}
+                              >
+                                {b.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Total footer */}
+            {leadProducts.length > 0 && (
+              <div className="p-3 border-t border-slate-100 bg-slate-50">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-900">
+                  <span>Total Value</span>
+                  <span>${totalValue.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center justify-center text-slate-400 gap-3">
+          <MessageCircle className="w-12 h-12 stroke-[1.5]" />
+          <p className="text-sm font-medium">Select a conversation</p>
+        </div>
+      )}
     </div>
   );
 };

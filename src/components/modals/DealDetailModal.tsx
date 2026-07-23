@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
-import { X, Building2, DollarSign, Calendar, Target, Tag, FileText, User, Layers } from 'lucide-react';
+import { X, DollarSign, Calendar, Target, Tag, FileText, User, Layers } from 'lucide-react';
 
 export const DealDetailModal: React.FC = () => {
   const { selectedDeal, setSelectedDeal, stages } = useCRM();

@@ -87,6 +87,21 @@ export interface WorkflowRule {
   accentColor?: string;
 }
 
+export type ProductStatus = 'pending' | 'quoted' | 'ordered' | 'delivered';
+
+export interface Product {
+  id: number;
+  leadId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  description: string;
+  notes: string;
+  status: ProductStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MetricCardData {
   id: string;
   title: string;
@@ -125,3 +140,5 @@ export interface Lead {
 }
 
 export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'settings';
+
+export type ProductFormData = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;

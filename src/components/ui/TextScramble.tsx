@@ -44,7 +44,7 @@ export const TextScramble: React.FC<TextScrambleProps> = ({ text, className, spe
     scramble();
 
     return () => clearTimeout(frameRef.current);
-  }, [text, speed]);
+  }, [text, speed, onComplete]);
 
   return <span className={className}>{displayedText}</span>;
 };

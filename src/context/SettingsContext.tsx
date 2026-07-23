@@ -101,31 +101,27 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const userId = user?.id || 'anonymous';
+  const [prevUserId, setPrevUserId] = useState(userId);
 
   const [settings, setSettings] = useState<UserSettings>(() => {
     try {
       const saved = localStorage.getItem(storageKey(userId));
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch {/* ignore corrupt data */}
     return DEFAULT_SETTINGS;
   });
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
 
-  // Reload settings when user changes
-  useEffect(() => {
+  // Reload settings when user changes (during render, not effect)
+  if (userId !== prevUserId) {
+    setPrevUserId(userId);
     try {
       const saved = localStorage.getItem(storageKey(userId));
-      if (saved) {
-        setSettings(JSON.parse(saved));
-      } else {
-        setSettings(DEFAULT_SETTINGS);
-      }
-    } catch {
-      setSettings(DEFAULT_SETTINGS);
-    }
-  }, [userId]);
+      setSettings(saved ? JSON.parse(saved) : DEFAULT_SETTINGS);
+    } catch {/* ignore corrupt data */}
+  }
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');

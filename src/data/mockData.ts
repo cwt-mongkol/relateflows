@@ -1,4 +1,4 @@
-import type { Deal, Contact, CompanyAccount, Activity, WorkflowRule, MetricCardData, PipelineStage, Lead, ChatMessage } from '../types/crm';
+import type { Deal, Contact, CompanyAccount, Activity, WorkflowRule, MetricCardData, PipelineStage, Lead, ChatMessage, Product } from '../types/crm';
 
 export const STAGE_COLORS = [
   '#94a3b8', // slate-400
@@ -45,6 +45,13 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   { id: 'MSG-009', channel: 'facebook', leadId: 'LD-005', from: 'contact', senderName: 'Emily Chen', senderAvatar: 'https://i.pravatar.cc/150?u=emily', content: 'Can you help me with the setup? Having trouble with the API integration.', timestamp: 'Yesterday at 9:30 PM', isRead: false },
   { id: 'MSG-010', channel: 'facebook', leadId: 'LD-005', from: 'contact', senderName: 'Emily Chen', senderAvatar: 'https://i.pravatar.cc/150?u=emily', content: 'I followed the docs but still getting 401 errors', timestamp: 'Yesterday at 9:31 PM', isRead: false },
   { id: 'MSG-011', channel: 'instagram', leadId: 'LD-006', from: 'contact', senderName: 'travel_with_me', senderAvatar: 'https://i.pravatar.cc/150?u=travel', content: 'How much for premium?', timestamp: 'Yesterday at 6:15 PM', isRead: true },
+];
+
+export const INITIAL_PRODUCTS: Product[] = [
+  { id: 1, leadId: 'LD-001', name: 'Enterprise License (Annual)', quantity: 1, price: 99000, description: 'Full enterprise plan with all features', notes: 'ต้องการใช้งานทั้งทีม 50 คน', status: 'pending', createdAt: '2026-07-22T10:00:00Z', updatedAt: '2026-07-22T10:00:00Z' },
+  { id: 2, leadId: 'LD-001', name: 'API Integration Package', quantity: 1, price: 25000, description: 'Custom API integration service', notes: 'เชื่อมต่อกับระบบ ERP เดิม', status: 'pending', createdAt: '2026-07-22T10:05:00Z', updatedAt: '2026-07-22T10:05:00Z' },
+  { id: 3, leadId: 'LD-002', name: 'Enterprise Plan', quantity: 1, price: 75000, description: 'Monthly enterprise subscription', notes: 'Needs custom onboarding', status: 'quoted', createdAt: '2026-07-21T14:00:00Z', updatedAt: '2026-07-21T16:30:00Z' },
+  { id: 4, leadId: 'LD-005', name: 'Technical Support Add-on', quantity: 1, price: 15000, description: 'Premium tech support - 24/7', notes: 'Having API integration issues', status: 'pending', createdAt: '2026-07-22T09:00:00Z', updatedAt: '2026-07-22T09:00:00Z' },
 ];
 
 export const INITIAL_DEALS: Deal[] = [

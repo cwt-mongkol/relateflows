@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { api } from '../lib/api';
 import type { 
   Deal, 
   Contact, 
@@ -11,7 +12,9 @@ import type {
   DealStage,
   PipelineStage,
   Lead,
-  ChatMessage
+  ChatMessage,
+  Product,
+  ProductFormData
 } from '../types/crm';
 import { 
   INITIAL_DEALS, 
@@ -22,7 +25,8 @@ import {
   INITIAL_METRICS,
   INITIAL_STAGES,
   INITIAL_LEADS,
-  INITIAL_CHAT_MESSAGES
+  INITIAL_CHAT_MESSAGES,
+  INITIAL_PRODUCTS
 } from '../data/mockData';
 
 interface CRMContextType {
@@ -69,7 +73,12 @@ interface CRMContextType {
   selectedLead: Lead | null;
   setSelectedLead: (l: Lead | null) => void;
   allocateLead: (leadId: string, salesPersonId: string) => void;
-  
+
+  products: Product[];
+  addProduct: (data: ProductFormData) => Promise<void>;
+  updateProduct: (id: number, data: Partial<Product>) => Promise<void>;
+  deleteProduct: (id: number) => Promise<void>;
+
   notificationCount: number;
   clearNotifications: () => void;
 }
@@ -93,6 +102,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
 
   // Per-user stages from localStorage
   const [stages, setStages] = useState<PipelineStage[]>(() => {
@@ -114,27 +124,29 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
         console.log('Fetching CRM data from database API...');
-        const [dealsRes, contactsRes, companiesRes, activitiesRes, workflowsRes, metricsRes, stagesRes, leadsRes, chatRes] = await Promise.all([
-          fetch('/api/deals'),
-          fetch('/api/contacts'),
-          fetch('/api/companies'),
-          fetch('/api/activities'),
-          fetch('/api/workflows'),
-          fetch('/api/metrics'),
-          fetch('/api/stages'),
-          fetch('/api/leads'),
-          fetch('/api/chat-messages')
+        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData, leadsData, chatData, productsData] = await Promise.all([
+          api.get<Deal[]>('/api/deals').catch(() => null),
+          api.get<Contact[]>('/api/contacts').catch(() => null),
+          api.get<CompanyAccount[]>('/api/companies').catch(() => null),
+          api.get<Activity[]>('/api/activities').catch(() => null),
+          api.get<WorkflowRule[]>('/api/workflows').catch(() => null),
+          api.get<MetricCardData[]>('/api/metrics').catch(() => null),
+          api.get<PipelineStage[]>('/api/stages').catch(() => null),
+          api.get<Lead[]>('/api/leads').catch(() => null),
+          api.get<ChatMessage[]>('/api/chat-messages').catch(() => null),
+          api.get<Product[]>('/api/products').catch(() => null),
         ]);
 
-        if (dealsRes.ok) { const fetched = await dealsRes.json(); if (fetched?.length > 0) setDeals(fetched); }
-        if (contactsRes.ok) { const fetched = await contactsRes.json(); if (fetched?.length > 0) setContacts(fetched); }
-        if (companiesRes.ok) { const fetched = await companiesRes.json(); if (fetched?.length > 0) setCompanies(fetched); }
-        if (activitiesRes.ok) { const fetched = await activitiesRes.json(); if (fetched?.length > 0) setActivities(fetched); }
-        if (workflowsRes.ok) { const fetched = await workflowsRes.json(); if (fetched?.length > 0) setWorkflows(fetched); }
-        if (metricsRes.ok) { const fetched = await metricsRes.json(); if (fetched?.length > 0) setMetrics(fetched); }
-        if (stagesRes.ok) { const fetched = await stagesRes.json(); if (fetched?.length > 0) setStages(fetched); }
-        if (leadsRes.ok) { const fetched = await leadsRes.json(); if (fetched?.length > 0) setLeads(fetched); }
-        if (chatRes.ok) { const fetched = await chatRes.json(); if (fetched?.length > 0) setChatMessages(fetched); }
+        if (dealsData?.length > 0) setDeals(dealsData);
+        if (contactsData?.length > 0) setContacts(contactsData);
+        if (companiesData?.length > 0) setCompanies(companiesData);
+        if (activitiesData?.length > 0) setActivities(activitiesData);
+        if (workflowsData?.length > 0) setWorkflows(workflowsData);
+        if (metricsData?.length > 0) setMetrics(metricsData);
+        if (stagesData?.length > 0) setStages(stagesData);
+        if (leadsData?.length > 0) setLeads(leadsData);
+        if (chatData?.length > 0) setChatMessages(chatData);
+        if (productsData?.length > 0) setProducts(productsData);
         console.log('CRM data successfully loaded from database.');
       } catch (err) {
         console.warn('Backend API not available, loading mock data:', err);
@@ -147,6 +159,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setStages(INITIAL_STAGES);
         setLeads(INITIAL_LEADS);
         setChatMessages(INITIAL_CHAT_MESSAGES);
+        setProducts(INITIAL_PRODUCTS);
         // Load per-user stages
         try {
           const saved = localStorage.getItem(`rf-stages-${userId}`);
@@ -162,37 +175,23 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addDeal = async (newDealData: Omit<Deal, 'id' | 'createdAt'>) => {
     try {
-      const response = await fetch('/api/deals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newDealData)
-      });
-      if (response.ok) {
-        const savedDeal = await response.json();
-        setDeals((prev) => [savedDeal, ...prev]);
+      const savedDeal = await api.post<any>('/api/deals', newDealData);
+      setDeals((prev) => [savedDeal, ...prev]);
 
-        // Log activity via API
-        const newActData = {
-          type: 'stage_change',
-          title: 'New Deal Created',
-          description: `Deal "${savedDeal.title}" created for ${savedDeal.company} ($${savedDeal.value.toLocaleString()}).`,
-          user: {
-            name: 'You (Current User)',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          },
-          targetName: `$${savedDeal.value.toLocaleString()}`
-        };
-        const actRes = await fetch('/api/activities', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newActData)
-        });
-        if (actRes.ok) {
-          const savedAct = await actRes.json();
-          setActivities((prev) => [savedAct, ...prev]);
-        }
-        return;
-      }
+      // Log activity via API
+      const newActData = {
+        type: 'stage_change',
+        title: 'New Deal Created',
+        description: `Deal "${savedDeal.title}" created for ${savedDeal.company} ($${savedDeal.value.toLocaleString()}).`,
+        user: {
+          name: 'You (Current User)',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        },
+        targetName: `$${savedDeal.value.toLocaleString()}`
+      };
+      const savedAct = await api.post<any>('/api/activities', newActData);
+      setActivities((prev) => [savedAct, ...prev]);
+      return;
     } catch (err) {
       console.warn('API connection failed for addDeal, falling back to local state update.', err);
     }
@@ -227,37 +226,23 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newProbability = newStage === 'closed_won' ? 100 : newStage === 'closed_lost' ? 0 : (targetDeal ? targetDeal.probability : 50);
 
     try {
-      const response = await fetch(`/api/deals/${dealId}/stage`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: newStage, probability: newProbability })
-      });
-      if (response.ok) {
-        const updatedDeal = await response.json();
-        setDeals((prev) => prev.map((d) => d.id === dealId ? updatedDeal : d));
+      const updatedDeal = await api.patch<any>(`/api/deals/${dealId}/stage`, { stage: newStage, probability: newProbability });
+      setDeals((prev) => prev.map((d) => d.id === dealId ? updatedDeal : d));
 
-        // Create activity
-        const newActData = {
-          type: newStage === 'closed_won' ? 'deal_won' : 'stage_change',
-          title: newStage === 'closed_won' ? 'Deal Closed Won!' : 'Stage Updated',
-          description: `Moved "${updatedDeal.title}" to ${stageLabel}.`,
-          user: {
-            name: 'You (Current User)',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          },
-          targetName: updatedDeal.company
-        };
-        const actRes = await fetch('/api/activities', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newActData)
-        });
-        if (actRes.ok) {
-          const savedAct = await actRes.json();
-          setActivities((prev) => [savedAct, ...prev]);
-        }
-        return;
-      }
+      // Create activity
+      const newActData = {
+        type: newStage === 'closed_won' ? 'deal_won' : 'stage_change',
+        title: newStage === 'closed_won' ? 'Deal Closed Won!' : 'Stage Updated',
+        description: `Moved "${updatedDeal.title}" to ${stageLabel}.`,
+        user: {
+          name: 'You (Current User)',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        },
+        targetName: updatedDeal.company
+      };
+      const savedAct = await api.post<any>('/api/activities', newActData);
+      setActivities((prev) => [savedAct, ...prev]);
+      return;
     } catch (err) {
       console.warn('API connection failed for updateDealStage, falling back to local state update.', err);
     }
@@ -295,13 +280,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteDeal = async (dealId: string) => {
     try {
-      const response = await fetch(`/api/deals/${dealId}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        setDeals((prev) => prev.filter((d) => d.id !== dealId));
-        return;
-      }
+      await api.delete(`/api/deals/${dealId}`);
+      setDeals((prev) => prev.filter((d) => d.id !== dealId));
+      return;
     } catch (err) {
       console.warn('API connection failed for deleteDeal, falling back to local state update.', err);
     }
@@ -312,16 +293,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addContact = async (newContactData: Omit<Contact, 'id' | 'lastContacted' | 'totalDealsValue'>) => {
     try {
-      const response = await fetch('/api/contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newContactData)
-      });
-      if (response.ok) {
-        const savedContact = await response.json();
-        setContacts((prev) => [savedContact, ...prev]);
-        return;
-      }
+      const savedContact = await api.post<any>('/api/contacts', newContactData);
+      setContacts((prev) => [savedContact, ...prev]);
+      return;
     } catch (err) {
       console.warn('API connection failed for addContact, falling back to local state update.', err);
     }
@@ -339,16 +313,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteContact = async (contactId: string) => {
     try {
-      const response = await fetch(`/api/contacts/${contactId}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        setContacts((prev) => prev.filter((c) => c.id !== contactId));
-        if (selectedContact?.id === contactId) {
-          setSelectedContact(null);
-        }
-        return;
+      await api.delete(`/api/contacts/${contactId}`);
+      setContacts((prev) => prev.filter((c) => c.id !== contactId));
+      if (selectedContact?.id === contactId) {
+        setSelectedContact(null);
       }
+      return;
     } catch (err) {
       console.warn('API connection failed for deleteContact, falling back to local state update.', err);
     }
@@ -362,14 +332,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const toggleWorkflowStatus = async (workflowId: string) => {
     try {
-      const response = await fetch(`/api/workflows/${workflowId}/toggle`, {
-        method: 'PATCH'
-      });
-      if (response.ok) {
-        const updatedWf = await response.json();
-        setWorkflows((prev) => prev.map((wf) => wf.id === workflowId ? updatedWf : wf));
-        return;
-      }
+      const updatedWf = await api.patch<any>(`/api/workflows/${workflowId}/toggle`, {});
+      setWorkflows((prev) => prev.map((wf) => wf.id === workflowId ? updatedWf : wf));
+      return;
     } catch (err) {
       console.warn('API connection failed for toggleWorkflowStatus, falling back to local state update.', err);
     }
@@ -386,16 +351,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addWorkflow = async (newWfData: Omit<WorkflowRule, 'id' | 'executionsCount' | 'lastExecuted'>) => {
     try {
-      const response = await fetch('/api/workflows', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newWfData)
-      });
-      if (response.ok) {
-        const savedWf = await response.json();
-        setWorkflows((prev) => [savedWf, ...prev]);
-        return;
-      }
+      const savedWf = await api.post<any>('/api/workflows', newWfData);
+      setWorkflows((prev) => [savedWf, ...prev]);
+      return;
     } catch (err) {
       console.warn('API connection failed for addWorkflow, falling back to local state update.', err);
     }
@@ -409,6 +367,45 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastExecuted: 'Never'
     };
     setWorkflows((prev) => [newWf, ...prev]);
+  };
+
+  const addProduct = async (data: ProductFormData) => {
+    try {
+      const saved = await api.post<Product>('/api/products', data);
+      setProducts((prev) => [saved, ...prev]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addProduct, falling back to local state.', err);
+    }
+    const newProduct: Product = {
+      ...data,
+      id: Date.now(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setProducts((prev) => [newProduct, ...prev]);
+  };
+
+  const updateProduct = async (id: number, data: Partial<Product>) => {
+    try {
+      const updated = await api.patch<Product>(`/api/products/${id}`, data);
+      setProducts((prev) => prev.map((p) => p.id === id ? updated : p));
+      return;
+    } catch (err) {
+      console.warn('API failed for updateProduct, falling back to local state.', err);
+    }
+    setProducts((prev) => prev.map((p) => p.id === id ? { ...p, ...data, updatedAt: new Date().toISOString() } : p));
+  };
+
+  const deleteProduct = async (id: number) => {
+    try {
+      await api.delete(`/api/products/${id}`);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteProduct, falling back to local state.', err);
+    }
+    setProducts((prev) => prev.filter((p) => p.id !== id));
   };
 
   const persistStages = (updated: PipelineStage[]) => {
@@ -483,6 +480,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         renameStage,
         deleteStage,
         allocateLead,
+        products,
+        addProduct,
+        updateProduct,
+        deleteProduct,
         notificationCount,
         clearNotifications
       }}

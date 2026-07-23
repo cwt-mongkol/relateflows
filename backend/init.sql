@@ -1,5 +1,32 @@
 -- Table Schemas
 
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id SERIAL PRIMARY KEY,
+    token VARCHAR(500) NOT NULL UNIQUE,
+    user_id VARCHAR(50) NOT NULL,
+    revoked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS tb_products (
+    id SERIAL PRIMARY KEY,
+    lead_id VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    price DECIMAL(12,2) DEFAULT 0,
+    description TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_lead ON tb_products(lead_id);
+
 CREATE TABLE IF NOT EXISTS companies (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
