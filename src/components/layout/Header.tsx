@@ -1,0 +1,150 @@
+import React from 'react';
+import { useCRM } from '../../context/CRMContext';
+import { 
+  Search, 
+  Bell, 
+  Plus, 
+  Sparkles, 
+  CheckCircle2,
+  Calendar
+} from 'lucide-react';
+
+export const Header: React.FC = () => {
+  const { 
+    currentView, 
+    searchQuery, 
+    setSearchQuery, 
+    setIsAddContactModalOpen,
+    notificationCount,
+    clearNotifications
+  } = useCRM();
+
+  const getPageMeta = () => {
+    switch (currentView) {
+      case 'dashboard':
+        return { title: 'Executive Overview', desc: 'Welcome back, Sarah. Here is your sales pipeline status.' };
+      case 'inbox':
+        return { title: 'Social Inbox', desc: '统一收件箱 — Facebook, Instagram, LINE messages in one place.' };
+      case 'pipeline':
+        return { title: 'Sales Pipeline & Kanban', desc: 'Manage deals, drag across stages, and close opportunities.' };
+      case 'contacts':
+        return { title: 'Contacts & Accounts', desc: 'Comprehensive CRM customer list and lead qualification.' };
+      case 'workflows':
+        return { title: 'RelateFlows Automation Engine', desc: 'Active triggers, automated email rules, and lead routing.' };
+      case 'analytics':
+        return { title: 'Sales Analytics & Reports', desc: 'Revenue breakdowns, win-rate metrics, and performance charts.' };
+      case 'settings':
+        return { title: 'System Settings', desc: 'Configure brand theme, user roles, integrations, and API keys.' };
+      default:
+        return { title: 'RelateFlows CRM', desc: 'Customer Relationship Management' };
+    }
+  };
+
+  const meta = getPageMeta();
+
+  return (
+    <header className="bg-white border-b border-slate-200 px-8 py-4 sticky top-0 z-20 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      {/* Title & View Info */}
+      <div>
+        <div className="flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{meta.title}</h2>
+        </div>
+        <p className="text-xs text-slate-500 mt-0.5 font-medium">{meta.desc}</p>
+      </div>
+
+      {/* Global Actions Bar */}
+      <div className="flex items-center gap-3">
+        {/* Search Bar */}
+        <div className="relative w-64 lg:w-72">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Search deals, contacts, companies..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+          {searchQuery && (
+            <button 
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 font-bold"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        {/* Quick Add Buttons */}
+        <button
+          onClick={() => setIsAddContactModalOpen(true)}
+          className="hidden sm:flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition-all"
+        >
+          <Plus className="w-4 h-4 stroke-[2.5]" />
+          <span>Add Contact</span>
+        </button>
+
+        {/* Notification Bell */}
+        <div className="dropdown dropdown-end">
+          <button 
+            tabIndex={0}
+            className="relative p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-all"
+          >
+            <Bell className="w-4 h-4" />
+            {notificationCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-yellow-500 text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-white animate-bounce">
+                {notificationCount}
+              </span>
+            )}
+          </button>
+          
+          <div 
+            tabIndex={0} 
+            className="dropdown-content z-[100] menu p-4 shadow-xl bg-white rounded-2xl border border-slate-100 w-80 mt-2 space-y-3"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="font-bold text-sm text-slate-900">Notifications</h4>
+              {notificationCount > 0 && (
+                <button 
+                  onClick={clearNotifications}
+                  className="text-[11px] text-blue-600 hover:underline font-semibold"
+                >
+                  Mark all as read
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-slate-800">Deal Closed Won!</p>
+                  <p className="text-slate-500 text-[11px]">Vanguard Pay signed contract ($210,000 ARR).</p>
+                  <span className="text-[10px] text-blue-600 font-medium mt-1 inline-block">10m ago</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-yellow-50 border border-yellow-100 flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-slate-800">RelateFlows Automation</p>
+                  <p className="text-slate-500 text-[11px]">Lead score trigger escalated David Miller (Apex Global).</p>
+                  <span className="text-[10px] text-yellow-600 font-medium mt-1 inline-block">1h ago</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-50 flex items-start gap-2.5">
+                <Calendar className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-slate-800">Meeting Reminder</p>
+                  <p className="text-slate-500 text-[11px]">Contract review with Catherine Hayes tomorrow at 10 AM.</p>
+                  <span className="text-[10px] text-slate-400 font-medium mt-1 inline-block">3h ago</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </header>
+  );
+};

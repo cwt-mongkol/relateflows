@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: relateflows-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: relateflows
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d relateflows"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  backend:
+    build: ./backend
+    container_name: relateflows-backend
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: relateflows
+      PORT: 5000
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: relateflows-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  postgres_data:
