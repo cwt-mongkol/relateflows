@@ -1,5 +1,6 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import { 
   Zap, 
   Plus, 
@@ -9,6 +10,7 @@ import {
 
 export const WorkflowsView: React.FC = () => {
   const { isLoading, workflows, toggleWorkflowStatus, setIsAddWorkflowModalOpen } = useCRM();
+  const { t } = useSettings();
 
   const totalExecutions = workflows.reduce((acc, w) => acc + w.executionsCount, 0);
 
@@ -62,14 +64,14 @@ export const WorkflowsView: React.FC = () => {
           <div
             key={wf.id}
             className={`bg-white rounded-2xl border ${
-              wf.status === 'active' ? 'border-blue-200 shadow-sm' : 'border-slate-200 opacity-75'
+              wf.status === 0 ? 'border-blue-200 shadow-sm' : 'border-slate-200 opacity-75'
             } p-6 space-y-4 hover:shadow-md transition-all duration-200 relative overflow-hidden`}
           >
             {/* Top Bar: Title, Category, Toggle */}
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md ${
-                  wf.status === 'active' ? 'bg-yellow-500 rf-yellow-glow' : 'bg-slate-400'
+                  wf.status === 0 ? 'bg-yellow-500 rf-yellow-glow' : 'bg-slate-400'
                 }`}>
                   <Zap className="w-5 h-5 fill-current" />
                 </div>
@@ -84,14 +86,14 @@ export const WorkflowsView: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
-                  wf.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                  wf.status === 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {wf.status === 'active' ? 'ACTIVE' : 'PAUSED'}
+                  {wf.status === 0 ? t('status.active').toUpperCase() : t('status.paused').toUpperCase()}
                 </span>
 
                 <input
                   type="checkbox"
-                  checked={wf.status === 'active'}
+                  checked={wf.status === 0}
                   onChange={() => toggleWorkflowStatus(wf.id)}
                   className="toggle toggle-primary toggle-sm"
                 />

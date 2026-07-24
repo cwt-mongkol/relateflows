@@ -1,5 +1,7 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
+import Chart from 'react-apexcharts';
+import type {} from 'apexcharts';
 import { 
   TrendingUp, 
   Award, 
@@ -105,16 +107,26 @@ export const DashboardView: React.FC = () => {
             </button>
           </div>
 
-          {/* Visual Stage Progress Bar */}
+          {/* Visual Stage Distribution Chart */}
           <div className="space-y-4">
-            <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden flex">
-              <div style={{ width: `${(stageCounts.lead_in / deals.length) * 100}%` }} className="bg-slate-400 h-full" title="Lead In" />
-              <div style={{ width: `${(stageCounts.contacted / deals.length) * 100}%` }} className="bg-blue-400 h-full" title="Contacted" />
-              <div style={{ width: `${(stageCounts.proposal / deals.length) * 100}%` }} className="bg-blue-600 h-full" title="Proposal" />
-              <div style={{ width: `${(stageCounts.negotiation / deals.length) * 100}%` }} className="bg-amber-500 h-full" title="Negotiation" />
-              <div style={{ width: `${(stageCounts.closed_won / deals.length) * 100}%` }} className="bg-emerald-500 h-full" title="Closed Won" />
-              <div style={{ width: `${(stageCounts.closed_lost / deals.length) * 100}%` }} className="bg-rose-400 h-full" title="Closed Lost" />
-            </div>
+            {(() => {
+              const stageNames = ['Lead In', 'Contacted', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
+              const stageKeys = ['lead_in', 'contacted', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
+              const stageColors = ['#94A3B8', '#60A5FA', '#2563ED', '#F59E0B', '#10B981', '#FB7185'];
+              const series = stageKeys.map(k => stageCounts[k] || 0);
+              const barOptions: ApexCharts.ApexOptions = {
+                chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'inherit' },
+                colors: stageColors,
+                plotOptions: { bar: { borderRadius: 4, horizontal: true, distributed: true, barHeight: '70%' } },
+                xaxis: { labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' } } },
+                yaxis: { labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' } } },
+                grid: { borderColor: '#e2e8f0', strokeDashArray: 4 },
+                dataLabels: { enabled: true, style: { fontSize: '11px', fontWeight: 700, colors: ['#fff'] }, formatter: (v) => `${v} deals` },
+                tooltip: { y: { formatter: (v) => `${v} deals` } },
+                legend: { show: false },
+              };
+              return <Chart options={barOptions} series={[{ data: series.map((v, i) => ({ x: stageNames[i], y: v })) }]} type="bar" height={260} />;
+            })()}
 
             {/* Stages Legend Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
@@ -230,7 +242,7 @@ export const DashboardView: React.FC = () => {
                     <h5 className="text-xs font-bold text-slate-900 truncate pr-2">{wf.title}</h5>
                     <input
                       type="checkbox"
-                      checked={wf.status === 'active'}
+                      checked={wf.status === 0}
                       onChange={() => toggleWorkflowStatus(wf.id)}
                       className="toggle toggle-primary toggle-xs"
                     />

@@ -14,7 +14,15 @@ import type {
   Lead,
   ChatMessage,
   Product,
-  ProductFormData
+  ProductFormData,
+  Category,
+  CategoryFormData,
+  SocialAccount,
+  Appointment,
+  AppointmentFormData,
+  Task,
+  CustomerTag,
+  AllocationRecord,
 } from '../types/crm';
 import { 
   INITIAL_DEALS, 
@@ -26,7 +34,15 @@ import {
   INITIAL_STAGES,
   INITIAL_LEADS,
   INITIAL_CHAT_MESSAGES,
-  INITIAL_PRODUCTS
+  INITIAL_PRODUCTS,
+  INITIAL_CATEGORIES,
+  INITIAL_SOCIAL_ACCOUNTS,
+  INITIAL_APPOINTMENTS,
+  INITIAL_TASKS,
+  INITIAL_TAGS,
+  INITIAL_ALLOCATIONS,
+  LEAD_TAGS,
+  enrichLeads,
 } from '../data/mockData';
 
 interface CRMContextType {
@@ -72,12 +88,36 @@ interface CRMContextType {
   chatMessages: ChatMessage[];
   selectedLead: Lead | null;
   setSelectedLead: (l: Lead | null) => void;
-  allocateLead: (leadId: string, salesPersonId: string) => void;
+  tags: CustomerTag[];
+  leadTags: Record<string, CustomerTag[]>;
+  allocations: AllocationRecord[];
+  addTag: (data: { name: string; color: string }) => Promise<void>;
+  updateTag: (id: number, data: Partial<CustomerTag>) => Promise<void>;
+  deleteTag: (id: number) => Promise<void>;
+  addTagToLead: (leadId: string, tagId: number) => Promise<void>;
+  removeTagFromLead: (leadId: string, tagId: number) => Promise<void>;
+  allocateLead: (leadId: string, salesPersonId: string, salesPersonName: string, salesPersonAvatar: string, projectName: string, notes: string, isReallocation: boolean) => Promise<void>;
+  getAllocationHistory: (leadId: string) => AllocationRecord[];
+  getLeadTags: (leadId: string) => CustomerTag[];
 
+  categories: Category[];
+  socialAccounts: SocialAccount[];
+  appointments: Appointment[];
+  addAppointment: (data: AppointmentFormData) => Promise<void>;
+  updateAppointment: (id: number, data: Partial<Appointment>) => Promise<void>;
+  deleteAppointment: (id: number) => Promise<void>;
+  addCategory: (data: CategoryFormData) => Promise<void>;
+  updateCategory: (id: number, data: Partial<Category>) => Promise<void>;
+  deleteCategory: (id: number) => Promise<void>;
   products: Product[];
   addProduct: (data: ProductFormData) => Promise<void>;
   updateProduct: (id: number, data: Partial<Product>) => Promise<void>;
   deleteProduct: (id: number) => Promise<void>;
+
+  tasks: Task[];
+  addTask: (data: Omit<Task, 'id' | 'createdAt'>) => Promise<void>;
+  updateTask: (id: string, data: Partial<Task>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
 
   notificationCount: number;
   clearNotifications: () => void;
@@ -102,7 +142,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [tags, setTags] = useState<CustomerTag[]>([]);
+  const [leadTags, setLeadTags] = useState<Record<string, CustomerTag[]>>({});
+  const [allocations, setAllocations] = useState<AllocationRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [socialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   // Per-user stages from localStorage
   const [stages, setStages] = useState<PipelineStage[]>(() => {
@@ -124,7 +171,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
         console.log('Fetching CRM data from database API...');
-        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData, leadsData, chatData, productsData] = await Promise.all([
+        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData] = await Promise.all([
           api.get<Deal[]>('/api/deals').catch(() => null),
           api.get<Contact[]>('/api/contacts').catch(() => null),
           api.get<CompanyAccount[]>('/api/companies').catch(() => null),
@@ -135,18 +182,33 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           api.get<Lead[]>('/api/leads').catch(() => null),
           api.get<ChatMessage[]>('/api/chat-messages').catch(() => null),
           api.get<Product[]>('/api/products').catch(() => null),
-        ]);
+          api.get<Category[]>('/api/categories').catch(() => null),
+          api.get<Appointment[]>('/api/appointments').catch(() => null),
+          api.get<Task[]>('/api/tasks').catch(() => null),
+          api.get<CustomerTag[]>('/api/tags').catch(() => null),
+          api.get<AllocationRecord[]>('/api/leads/allocations').catch(() => null),
+        ]) as [
+          Deal[] | null, Contact[] | null, CompanyAccount[] | null, Activity[] | null,
+          WorkflowRule[] | null, MetricCardData[] | null, PipelineStage[] | null,
+          Lead[] | null, ChatMessage[] | null, Product[] | null, Category[] | null,
+          Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null
+        ];
 
-        if (dealsData?.length > 0) setDeals(dealsData);
-        if (contactsData?.length > 0) setContacts(contactsData);
-        if (companiesData?.length > 0) setCompanies(companiesData);
-        if (activitiesData?.length > 0) setActivities(activitiesData);
-        if (workflowsData?.length > 0) setWorkflows(workflowsData);
-        if (metricsData?.length > 0) setMetrics(metricsData);
-        if (stagesData?.length > 0) setStages(stagesData);
-        if (leadsData?.length > 0) setLeads(leadsData);
-        if (chatData?.length > 0) setChatMessages(chatData);
-        if (productsData?.length > 0) setProducts(productsData);
+        if (dealsData && dealsData.length > 0) setDeals(dealsData);
+        if (contactsData && contactsData.length > 0) setContacts(contactsData);
+        if (companiesData && companiesData.length > 0) setCompanies(companiesData);
+        if (activitiesData && activitiesData.length > 0) setActivities(activitiesData);
+        if (workflowsData && workflowsData.length > 0) setWorkflows(workflowsData);
+        if (metricsData && metricsData.length > 0) setMetrics(metricsData);
+        if (stagesData && stagesData.length > 0) setStages(stagesData);
+        if (leadsData && leadsData.length > 0) setLeads(leadsData);
+        if (chatData && chatData.length > 0) setChatMessages(chatData);
+        if (productsData && productsData.length > 0) setProducts(productsData);
+        if (categoriesData && categoriesData.length > 0) setCategories(categoriesData);
+        if (appointmentsData && appointmentsData.length > 0) setAppointments(appointmentsData);
+        if (tasksData && tasksData.length > 0) setTasks(tasksData);
+        if (tagsData && tagsData.length > 0) setTags(tagsData);
+        if (allocData && allocData.length > 0) setAllocations(allocData);
         console.log('CRM data successfully loaded from database.');
       } catch (err) {
         console.warn('Backend API not available, loading mock data:', err);
@@ -157,9 +219,15 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setWorkflows(INITIAL_WORKFLOWS);
         setMetrics(INITIAL_METRICS);
         setStages(INITIAL_STAGES);
-        setLeads(INITIAL_LEADS);
+        setLeads(enrichLeads(INITIAL_LEADS));
         setChatMessages(INITIAL_CHAT_MESSAGES);
         setProducts(INITIAL_PRODUCTS);
+        setCategories(INITIAL_CATEGORIES);
+        setAppointments(INITIAL_APPOINTMENTS);
+        setTasks(INITIAL_TASKS);
+        setTags(INITIAL_TAGS);
+        setLeadTags(LEAD_TAGS);
+        setAllocations(INITIAL_ALLOCATIONS);
         // Load per-user stages
         try {
           const saved = localStorage.getItem(`rf-stages-${userId}`);
@@ -343,7 +411,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWorkflows((prev) =>
       prev.map((wf) =>
         wf.id === workflowId
-          ? { ...wf, status: wf.status === 'active' ? 'paused' : 'active' }
+          ? { ...wf, status: wf.status === 0 ? 1 : 0 }
           : wf
       )
     );
@@ -408,6 +476,81 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const addAppointment = async (data: AppointmentFormData) => {
+    try {
+      const saved = await api.post<Appointment>('/api/appointments', data);
+      setAppointments((prev) => [...prev, saved]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addAppointment, falling back.', err);
+    }
+    const newAppt: Appointment = {
+      ...data,
+      id: Date.now(),
+      googleEventId: '',
+      createdBy: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setAppointments((prev) => [...prev, newAppt]);
+  };
+
+  const updateAppointment = async (id: number, data: Partial<Appointment>) => {
+    try {
+      const updated = await api.patch<Appointment>(`/api/appointments/${id}`, data);
+      setAppointments((prev) => prev.map((a) => a.id === id ? updated : a));
+      return;
+    } catch (err) {
+      console.warn('API failed for updateAppointment, falling back.', err);
+    }
+    setAppointments((prev) => prev.map((a) => a.id === id ? { ...a, ...data, updatedAt: new Date().toISOString() } : a));
+  };
+
+  const deleteAppointment = async (id: number) => {
+    try {
+      await api.delete(`/api/appointments/${id}`);
+      setAppointments((prev) => prev.filter((a) => a.id !== id));
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteAppointment, falling back.', err);
+    }
+    setAppointments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const addCategory = async (data: CategoryFormData) => {
+    try {
+      const saved = await api.post<Category>('/api/categories', data);
+      setCategories((prev) => [...prev, saved]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addCategory, falling back.', err);
+    }
+    const newCat: Category = { ...data, id: Date.now(), createdAt: new Date().toISOString() };
+    setCategories((prev) => [...prev, newCat]);
+  };
+
+  const updateCategory = async (id: number, data: Partial<Category>) => {
+    try {
+      const updated = await api.patch<Category>(`/api/categories/${id}`, data);
+      setCategories((prev) => prev.map((c) => c.id === id ? updated : c));
+      return;
+    } catch (err) {
+      console.warn('API failed for updateCategory, falling back.', err);
+    }
+    setCategories((prev) => prev.map((c) => c.id === id ? { ...c, ...data } : c));
+  };
+
+  const deleteCategory = async (id: number) => {
+    try {
+      await api.delete(`/api/categories/${id}`);
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteCategory, falling back.', err);
+    }
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+  };
+
   const persistStages = (updated: PipelineStage[]) => {
     localStorage.setItem(`rf-stages-${userId}`, JSON.stringify(updated));
   };
@@ -436,8 +579,178 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const allocateLead = (leadId: string, salesPersonId: string) => {
+  const addTask = async (data: Omit<Task, 'id' | 'createdAt'>) => {
+    try {
+      const saved = await api.post<Task>('/api/tasks', data);
+      setTasks((prev) => [saved, ...prev]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addTask, falling back.', err);
+    }
+    const newTask: Task = {
+      ...data,
+      id: `TSK-${Date.now()}`,
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    setTasks((prev) => [newTask, ...prev]);
+  };
+
+  const updateTask = async (id: string, data: Partial<Task>) => {
+    try {
+      const updated = await api.patch<Task>(`/api/tasks/${id}`, data);
+      setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
+      return;
+    } catch (err) {
+      console.warn('API failed for updateTask, falling back.', err);
+    }
+    setTasks((prev) => prev.map((t) => t.id === id ? { ...t, ...data } : t));
+  };
+
+  const deleteTask = async (id: string) => {
+    try {
+      await api.delete(`/api/tasks/${id}`);
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteTask, falling back.', err);
+    }
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const allocateLead = async (leadId: string, salesPersonId: string, salesPersonName: string, salesPersonAvatar: string, projectName: string, notes: string, isReallocation: boolean) => {
+    try {
+      const alloc = await api.post<AllocationRecord>(`/api/leads/${leadId}/allocate`, {
+        salesPersonId, salesPersonName, salesPersonAvatar, projectName, notes, isReallocation,
+      });
+      setAllocations((prev) => {
+        if (!isReallocation) {
+          const existingIdx = prev.findIndex(a => a.leadId === leadId && a.status === 'active');
+          if (existingIdx >= 0) {
+            const updated = [...prev];
+            updated[existingIdx] = alloc;
+            return updated;
+          }
+        }
+        return [...prev, alloc];
+      });
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, isAllocated: true, assignedTo: salesPersonId } : l));
+      return;
+    } catch (err) {
+      console.warn('API failed for allocateLead, falling back to local state.', err);
+    }
+    // Local fallback
+    const existingAlloc = allocations.find(a => a.leadId === leadId && a.status === 'active');
+    if (!isReallocation && existingAlloc) {
+      setAllocations(prev => prev.map(a => a.id === existingAlloc.id ? { ...a, salesPersonId, salesPersonName, salesPersonAvatar, projectName: projectName || a.projectName, notes: notes || a.notes, updatedAt: new Date().toISOString() } : a));
+    } else {
+      const newAlloc: AllocationRecord = {
+        id: Date.now(),
+        leadId,
+        salesPersonId,
+        salesPersonName,
+        salesPersonAvatar,
+        projectName: projectName || '',
+        status: 'active',
+        notes: notes || '',
+        isReallocation,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setAllocations(prev => [...prev, newAlloc]);
+    }
     setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, isAllocated: true, assignedTo: salesPersonId } : l));
+  };
+
+  const getAllocationHistory = (leadId: string): AllocationRecord[] => {
+    return allocations.filter(a => a.leadId === leadId);
+  };
+
+  const getLeadTags = (leadId: string): CustomerTag[] => {
+    return leadTags[leadId] || [];
+  };
+
+  const addTag = async (data: { name: string; color: string }) => {
+    try {
+      const saved = await api.post<CustomerTag>('/api/tags', data);
+      setTags((prev) => [...prev, saved]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addTag, falling back.', err);
+    }
+    const newTag: CustomerTag = {
+      id: Date.now(),
+      name: data.name,
+      color: data.color || '#6366f1',
+      createdAt: new Date().toISOString(),
+    };
+    setTags((prev) => [...prev, newTag]);
+  };
+
+  const updateTag = async (id: number, data: Partial<CustomerTag>) => {
+    try {
+      const updated = await api.patch<CustomerTag>(`/api/tags/${id}`, data);
+      setTags((prev) => prev.map((t) => t.id === id ? updated : t));
+      return;
+    } catch (err) {
+      console.warn('API failed for updateTag, falling back.', err);
+    }
+    setTags((prev) => prev.map((t) => t.id === id ? { ...t, ...data } : t));
+  };
+
+  const deleteTag = async (id: number) => {
+    try {
+      await api.delete(`/api/tags/${id}`);
+      setTags((prev) => prev.filter((t) => t.id !== id));
+      Object.keys(leadTags).forEach((leadId) => {
+        if (leadTags[leadId].some(t => t.id === id)) {
+          setLeadTags((prev) => ({ ...prev, [leadId]: prev[leadId].filter(t => t.id !== id) }));
+        }
+      });
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteTag, falling back.', err);
+    }
+    setTags((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const addTagToLead = async (leadId: string, tagId: number) => {
+    try {
+      await api.post(`/api/leads/${leadId}/tags`, { tagId });
+      const tag = tags.find(t => t.id === tagId);
+      if (tag) {
+        setLeadTags((prev) => ({
+          ...prev,
+          [leadId]: [...(prev[leadId] || []), tag],
+        }));
+      }
+      return;
+    } catch (err) {
+      console.warn('API failed for addTagToLead, falling back.', err);
+    }
+    const tag = tags.find(t => t.id === tagId);
+    if (tag) {
+      setLeadTags((prev) => ({
+        ...prev,
+        [leadId]: [...(prev[leadId] || []), tag],
+      }));
+    }
+  };
+
+  const removeTagFromLead = async (leadId: string, tagId: number) => {
+    try {
+      await api.delete(`/api/leads/${leadId}/tags/${tagId}`);
+      setLeadTags((prev) => ({
+        ...prev,
+        [leadId]: (prev[leadId] || []).filter(t => t.id !== tagId),
+      }));
+      return;
+    } catch (err) {
+      console.warn('API failed for removeTagFromLead, falling back.', err);
+    }
+    setLeadTags((prev) => ({
+      ...prev,
+      [leadId]: (prev[leadId] || []).filter(t => t.id !== tagId),
+    }));
   };
 
   return (
@@ -457,6 +770,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         chatMessages,
         selectedLead,
         setSelectedLead,
+        tags,
+        leadTags,
+        allocations,
         searchQuery,
         setSearchQuery,
         selectedContact,
@@ -479,11 +795,31 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addStage,
         renameStage,
         deleteStage,
+        addTag,
+        updateTag,
+        deleteTag,
+        addTagToLead,
+        removeTagFromLead,
+        getAllocationHistory,
+        getLeadTags,
         allocateLead,
+        categories,
+        socialAccounts,
+        appointments,
+        addAppointment,
+        updateAppointment,
+        deleteAppointment,
+        addCategory,
+        updateCategory,
+        deleteCategory,
         products,
         addProduct,
         updateProduct,
         deleteProduct,
+        tasks,
+        addTask,
+        updateTask,
+        deleteTask,
         notificationCount,
         clearNotifications
       }}

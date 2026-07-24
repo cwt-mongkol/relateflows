@@ -30,7 +30,7 @@ export const TextScramble: React.FC<TextScrambleProps> = ({ text, className, spe
       setDisplayedText(
         text
           .split('')
-          .map((char, i) => {
+          .map((_, i) => {
             if (i < charsRevealed) return text[i];
             return CHARS[Math.floor(Math.random() * CHARS.length)];
           })

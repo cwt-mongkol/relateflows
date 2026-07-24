@@ -24,7 +24,7 @@ export const AddWorkflowModal: React.FC = () => {
       description: description || `Automatically execute when ${trigger}.`,
       trigger,
       action,
-      status: 'active',
+      status: 0,
       category,
       accentColor: '#1D4ED8'
     });

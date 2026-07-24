@@ -5,7 +5,7 @@ import {
   Plus, 
   Filter, 
   Building2, 
-  Sparkles,
+  Award,
   ChevronRight
 } from 'lucide-react';
 
@@ -128,7 +128,7 @@ export const ContactsView: React.FC = () => {
                             {contact.name}
                             {contact.leadScore >= 90 && (
                               <span title="VIP High Score">
-                                <Sparkles className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
+                                <Award className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
                               </span>
                             )}
                           </h4>

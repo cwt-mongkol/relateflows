@@ -40,7 +40,7 @@ export interface Contact {
   role: string;
   lifecycleStage: LifecycleStage;
   leadScore: number;
-  status: 'active' | 'inactive' | 'pending';
+  status: 0 | 1 | 2;
   avatar: string;
   lastContacted: string;
   totalDealsValue: number;
@@ -80,18 +80,32 @@ export interface WorkflowRule {
   description: string;
   trigger: string;
   action: string;
-  status: 'active' | 'paused';
+  status: 0 | 1;
   executionsCount: number;
   lastExecuted: string;
   category: 'Lead Nurturing' | 'Sales Operations' | 'Deal Routing' | 'Customer Success';
   accentColor?: string;
 }
 
-export type ProductStatus = 'pending' | 'quoted' | 'ordered' | 'delivered';
+export interface Category {
+  id: number;
+  name: string;
+  description: string;
+  createdAt: string;
+}
+
+export type ProductStatus = 0 | 1 | 2 | 3;
+export const PRODUCT_STATUS_LABELS: Record<ProductStatus, string> = {
+  0: 'Pending',
+  1: 'Quoted',
+  2: 'Ordered',
+  3: 'Delivered',
+};
 
 export interface Product {
   id: number;
   leadId: string;
+  categoryId: number | null;
   name: string;
   quantity: number;
   price: number;
@@ -112,7 +126,45 @@ export interface MetricCardData {
   iconName: string;
 }
 
+export type AppointmentStatus = 0 | 1 | 2;
+export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
+  0: 'Scheduled',
+  1: 'Completed',
+  2: 'Cancelled',
+};
+export type AppointmentType = 'activity' | 'meeting' | 'appointment';
+
+export interface Appointment {
+  id: number;
+  leadId: string;
+  title: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  type: AppointmentType;
+  status: AppointmentStatus;
+  location: string;
+  googleEventId: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  guests?: string[];
+  reminders?: { id: string; type: 'notification' | 'email'; time: number; label?: string }[];
+  recurrence?: { freq: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'; interval?: number; count?: number; until?: string; byweekday?: number[] };
+  attachments?: { id: string; name: string; url?: string; type: 'file' | 'link' | 'image'; size?: string }[];
+}
+
+export type AppointmentFormData = Omit<Appointment, 'id' | 'googleEventId' | 'createdBy' | 'createdAt' | 'updatedAt'>;
+
 export type ChatChannel = 'facebook' | 'instagram' | 'line';
+
+export interface SocialAccount {
+  id: string;
+  channel: ChatChannel;
+  name: string;
+  avatar: string;
+  connected: boolean;
+}
 
 export interface ChatMessage {
   id: string;
@@ -126,19 +178,104 @@ export interface ChatMessage {
   isRead: boolean;
 }
 
+export interface CustomerTag {
+  id: number;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface AllocationRecord {
+  id: number;
+  leadId: string;
+  salesPersonId: string;
+  salesPersonName: string;
+  salesPersonAvatar: string;
+  projectName: string;
+  status: 'active' | 'completed' | 'cancelled';
+  notes: string;
+  isReallocation: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
   avatar: string;
   channel: ChatChannel;
+  socialAccountId: string;
   lastMessage: string;
   lastMessageTime: string;
   unreadCount: number;
   isAllocated: boolean;
   assignedTo?: string;
+  tags?: CustomerTag[];
+  allocationHistory?: AllocationRecord[];
   createdAt: string;
 }
 
-export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'settings';
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  priority: Priority;
+  status: 'todo' | 'in_progress' | 'done';
+  dueDate: string;
+  assignee: { name: string; avatar: string; };
+  relatedTo?: { type: 'deal' | 'contact'; id: string; label: string; };
+  createdAt: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description: string;
+  isSystem: boolean;
+  createdAt: string;
+}
+
+export interface Permission {
+  id: number;
+  module: string;
+  action: string;
+  label: string;
+}
+
+export interface CrmUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  provider: string;
+  roleId: number | null;
+  roleName?: string;
+  status: 'active' | 'inactive' | 'suspended';
+  createdAt: string;
+}
+
+export interface SocialChannel {
+  id: number;
+  type: 'facebook' | 'instagram' | 'line';
+  displayName: string;
+  pageId: string;
+  status: 'connected' | 'disconnected' | 'error' | 'expired';
+  lastHealthCheck?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface ChannelAccessRow {
+  userId: string;
+  channelId: number;
+  userName: string;
+  channelName: string;
+  channelType: string;
+}
+
+export type SettingsTab = 'general' | 'users' | 'roles' | 'channels' | 'access' | 'integrations';
+
+export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'calendar' | 'tasks' | 'settings';
 
 export type ProductFormData = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
+export type CategoryFormData = Omit<Category, 'id' | 'createdAt'>;

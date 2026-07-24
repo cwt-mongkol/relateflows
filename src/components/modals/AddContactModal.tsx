@@ -31,7 +31,7 @@ export const AddContactModal: React.FC = () => {
       role: role || 'Manager',
       lifecycleStage,
       leadScore: Number(leadScore),
-      status: 'active',
+      status: 0,
       avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random()*100000)}?w=150&auto=format&fit=crop&q=80`,
       tags: ['New Lead', 'CRM'],
       notes

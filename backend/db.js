@@ -2,6 +2,7 @@ import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { AsyncLocalStorage } from 'async_hooks';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +11,7 @@ const { Pool } = pg;
 
 const connectionString = process.env.DATABASE_URL;
 
-const pool = connectionString 
+const realPool = connectionString 
   ? new Pool({ connectionString }) 
   : new Pool({
       host: process.env.DB_HOST || 'localhost',
@@ -19,6 +20,27 @@ const pool = connectionString
       database: process.env.DB_NAME || 'relateflows',
       port: parseInt(process.env.DB_PORT || '5432'),
     });
+
+// AsyncLocalStorage — stores { client, tenantId } per request so the proxied
+// pool transparently routes queries through the tenant-scoped client.
+export const tenantStorage = new AsyncLocalStorage();
+
+// Proxied pool: when a tenant-scoped client exists in the current async
+// context, all pool.query() calls are forwarded to that client (with RLS).
+// This lets route handlers keep using pool.query() unchanged.
+const pool = new Proxy(realPool, {
+  get(target, prop) {
+    if (prop === 'query') {
+      const store = tenantStorage.getStore();
+      if (store && store.client) {
+        return store.client.query.bind(store.client);
+      }
+      return target.query.bind(target);
+    }
+    const val = target[prop];
+    return typeof val === 'function' ? val.bind(target) : val;
+  }
+});
 
 export async function initDb() {
   let retries = 10;

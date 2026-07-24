@@ -1,15 +1,17 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import { 
   Search, 
   Bell, 
   Plus, 
-  Sparkles, 
+  Zap, 
   CheckCircle2,
   Calendar
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
+  const { t } = useSettings();
   const { 
     currentView, 
     searchQuery, 
@@ -22,21 +24,23 @@ export const Header: React.FC = () => {
   const getPageMeta = () => {
     switch (currentView) {
       case 'dashboard':
-        return { title: 'Executive Overview', desc: 'Welcome back, Sarah. Here is your sales pipeline status.' };
+        return { title: t('page.dashboard'), desc: t('page.dashboard.desc') };
       case 'inbox':
-        return { title: 'Social Inbox', desc: '统一收件箱 — Facebook, Instagram, LINE messages in one place.' };
+        return { title: t('page.inbox'), desc: t('page.inbox.desc') };
       case 'pipeline':
-        return { title: 'Sales Pipeline & Kanban', desc: 'Manage deals, drag across stages, and close opportunities.' };
+        return { title: t('page.pipeline'), desc: t('page.pipeline.desc') };
       case 'contacts':
-        return { title: 'Contacts & Accounts', desc: 'Comprehensive CRM customer list and lead qualification.' };
+        return { title: t('page.contacts'), desc: t('page.contacts.desc') };
       case 'workflows':
-        return { title: 'RelateFlows Automation Engine', desc: 'Active triggers, automated email rules, and lead routing.' };
+        return { title: t('page.workflows'), desc: t('page.workflows.desc') };
       case 'analytics':
-        return { title: 'Sales Analytics & Reports', desc: 'Revenue breakdowns, win-rate metrics, and performance charts.' };
+        return { title: t('page.analytics'), desc: t('page.analytics.desc') };
+      case 'calendar':
+        return { title: t('page.calendar'), desc: t('page.calendar.desc') };
       case 'settings':
-        return { title: 'System Settings', desc: 'Configure brand theme, user roles, integrations, and API keys.' };
+        return { title: t('page.settings'), desc: t('page.settings.desc') };
       default:
-        return { title: 'RelateFlows CRM', desc: 'Customer Relationship Management' };
+        return { title: t('page.default'), desc: t('page.default.desc') };
     }
   };
 
@@ -124,7 +128,7 @@ export const Header: React.FC = () => {
               </div>
 
               <div className="p-2.5 rounded-xl bg-yellow-50 border border-yellow-100 flex items-start gap-2.5">
-                <Sparkles className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
+                <Zap className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold text-slate-800">RelateFlows Automation</p>
                   <p className="text-slate-500 text-[11px]">Lead score trigger escalated David Miller (Apex Global).</p>

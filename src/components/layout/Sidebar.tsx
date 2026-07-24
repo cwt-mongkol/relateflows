@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../lib/permissions';
 import type { NavView } from '../../types/crm';
 import {
   LayoutDashboard,
@@ -9,28 +10,30 @@ import {
   Zap,
   BarChart3,
   Settings,
+  Calendar,
   MessageCircle,
+  ClipboardList,
   ChevronRight,
   ChevronLeft,
   TrendingUp,
   Plus,
   LogOut,
-  User,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Shield
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
-  const { currentView, setCurrentView, deals, contacts, workflows, leads, setIsAddDealModalOpen } = useCRM();
+  const { currentView, setCurrentView, deals, contacts, workflows, leads, tasks, setIsAddDealModalOpen } = useCRM();
   const { user, logout } = useAuth();
+  const { canNav, roleName } = usePermissions();
   const [collapsed, setCollapsed] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
 
   const activeDealsCount = deals.filter(d => d.stage !== 'closed_lost').length;
-  const activeWorkflowsCount = workflows.filter(w => w.status === 'active').length;
 
-  const navItems: { id: NavView; label: string; icon: React.ReactNode; badge?: number | string }[] = [
+  const allNavItems: { id: NavView; label: string; icon: React.ReactNode; badge?: number | string }[] = [
     {
       id: 'dashboard',
       label: 'Dashboard',
@@ -56,14 +59,25 @@ export const Sidebar: React.FC = () => {
     },
     {
       id: 'workflows',
-      label: 'RelateFlows Engine',
+      label: 'Workflows',
       icon: <Zap className="w-5 h-5" />,
-      badge: activeWorkflowsCount
+      badge: workflows.filter((w) => w.status === 0).length
+    },
+    {
+      id: 'tasks',
+      label: 'Tasks',
+      icon: <ClipboardList className="w-5 h-5" />,
+      badge: tasks.filter((t) => t.status !== 'done').length
+    },
+    {
+      id: 'calendar',
+      label: 'Calendar',
+      icon: <Calendar className="w-5 h-5" />,
     },
     {
       id: 'analytics',
-      label: 'Analytics & Insights',
-      icon: <BarChart3 className="w-5 h-5" />
+      label: 'Analytics',
+      icon: <BarChart3 className="w-5 h-5" />,
     },
     {
       id: 'settings',
@@ -71,6 +85,8 @@ export const Sidebar: React.FC = () => {
       icon: <Settings className="w-5 h-5" />
     }
   ];
+
+  const navItems = allNavItems.filter(n => canNav(n.id));
 
   const handleSignOut = () => {
     setShowSignOutModal(false);
@@ -199,7 +215,7 @@ export const Sidebar: React.FC = () => {
                 <>
                   <div className="truncate text-left flex-1">
                     <h4 className="text-xs font-bold text-slate-800 truncate">{user?.name || 'User'}</h4>
-                    <p className="text-[10px] text-slate-500 truncate">{user?.provider === 'google' ? 'Google Account' : 'Line Account'}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{roleName}</p>
                   </div>
                   <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showUserMenu ? 'rotate-90' : ''}`} />
                 </>
@@ -211,13 +227,10 @@ export const Sidebar: React.FC = () => {
             <>
               <div className="absolute left-full bottom-0 ml-2 w-48 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-40">
                 <div className="p-2 space-y-0.5">
-                  <button
-                    onClick={() => { setShowUserMenu(false); setCurrentView('settings'); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-all"
-                  >
-                    <User className="w-4 h-4 text-slate-400" />
-                    <span>Profile</span>
-                  </button>
+                  <div className="px-3 py-2 text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
+                    <Shield className="w-3 h-3" />
+                    {roleName}
+                  </div>
                   <button
                     onClick={() => { setShowUserMenu(false); setCurrentView('settings'); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-all"

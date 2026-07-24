@@ -1,7 +1,9 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
-import { 
-  Target, 
+import Chart from 'react-apexcharts';
+import type {} from 'apexcharts';
+import {
+  Target,
   ArrowUpRight,
   CheckCircle2
 } from 'lucide-react';
@@ -14,7 +16,6 @@ export const AnalyticsView: React.FC = () => {
   const wonValue = wonDeals.reduce((acc, d) => acc + d.value, 0);
   const winRate = deals.length > 0 ? Math.round((wonDeals.length / deals.length) * 100) : 0;
 
-  // Source attribution mock math
   const leadSources = [
     { source: 'Inbound Website', count: 4, value: '$220,000', percent: 45, color: 'bg-blue-600' },
     { source: 'Outbound Campaign', count: 2, value: '$210,000', percent: 35, color: 'bg-yellow-500' },
@@ -27,6 +28,38 @@ export const AnalyticsView: React.FC = () => {
     { name: 'Alex Rivera', role: 'Senior AE', won: '$143,000', count: 2, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80' },
     { name: 'Marcus Brody', role: 'Account Executive', won: '$62,000', count: 2, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80' },
   ];
+
+  const revenueBarOptions: ApexCharts.ApexOptions = {
+    chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'inherit' },
+    colors: ['#1D4ED8'],
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '60%' } },
+    xaxis: {
+      categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+      labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' } },
+    },
+    yaxis: {
+      labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' }, formatter: (v) => `$${v}k` },
+    },
+    grid: { borderColor: '#e2e8f0', strokeDashArray: 4 },
+    tooltip: { y: { formatter: (v) => `$${v}k` } },
+    dataLabels: { enabled: false },
+  };
+
+  const revenueBarSeries = [
+    { name: 'Revenue', data: [90, 110, 140, 120, 170, 190, 210] },
+  ];
+
+  const pieOptions: ApexCharts.ApexOptions = {
+    chart: { type: 'donut', fontFamily: 'inherit' },
+    labels: leadSources.map(s => s.source),
+    colors: ['#2563EB', '#EAB308', '#F59E0B', '#94A3B8'],
+    plotOptions: { pie: { donut: { size: '55%' }, expandOnClick: false } },
+    legend: { position: 'bottom', fontSize: '11px', fontWeight: 600, markers: { size: 6 } },
+    dataLabels: { enabled: true, formatter: (_val: number, opts: any) => `${opts.w.globals.series[opts.seriesIndex]}%` },
+    tooltip: { y: { formatter: (_v: number, opts?: any) => `${leadSources[opts?.seriesIndex]?.value || ''} (${_v}%)` } },
+  };
+
+  const pieSeries = leadSources.map(s => s.percent);
 
   if (isLoading) {
     return (
@@ -44,7 +77,6 @@ export const AnalyticsView: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Pipeline ARR</span>
@@ -79,9 +111,7 @@ export const AnalyticsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Charts & Breakdown Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Trend Visual Bar Chart (Custom SVG bar chart) */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
@@ -93,58 +123,18 @@ export const AnalyticsView: React.FC = () => {
             </span>
           </div>
 
-          {/* SVG Bar Chart Visualization */}
-          <div className="h-64 flex items-end justify-between gap-4 pt-6 px-2">
-            {[
-              { month: 'Jan', value: 45, label: '$90k' },
-              { month: 'Feb', value: 55, label: '$110k' },
-              { month: 'Mar', value: 70, label: '$140k' },
-              { month: 'Apr', value: 60, label: '$120k' },
-              { month: 'May', value: 85, label: '$170k' },
-              { month: 'Jun', value: 95, label: '$190k' },
-              { month: 'Jul (Current)', value: 120, label: '$210k', isCurrent: true },
-            ].map((bar, idx) => (
-              <div key={idx} className="flex-1 flex flex-col items-center gap-2 group h-full justify-end">
-                <span className="text-[10px] font-extrabold text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {bar.label}
-                </span>
-                <div
-                  style={{ height: `${(bar.value / 130) * 100}%` }}
-                  className={`w-full rounded-t-xl transition-all duration-300 ${
-                    bar.isCurrent
-                      ? 'bg-gradient-to-t from-yellow-500 to-yellow-400 shadow-md rf-yellow-glow'
-                      : 'bg-gradient-to-t from-blue-700 to-blue-500 hover:from-blue-600 hover:to-blue-400'
-                  }`}
-                />
-                <span className="text-[11px] font-bold text-slate-600">{bar.month}</span>
-              </div>
-            ))}
-          </div>
+          <Chart options={revenueBarOptions} series={revenueBarSeries} type="bar" height={280} />
         </div>
 
-        {/* Lead Source Attribution */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
           <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
             Lead Source Attribution
           </h3>
 
-          <div className="space-y-4">
-            {leadSources.map((ls, idx) => (
-              <div key={idx} className="space-y-1.5">
-                <div className="flex justify-between text-xs font-bold text-slate-800">
-                  <span>{ls.source}</span>
-                  <span className="text-slate-600">{ls.value} ({ls.percent}%)</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                  <div className={`${ls.color} h-full rounded-full`} style={{ width: `${ls.percent}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
+          <Chart options={pieOptions} series={pieSeries} type="donut" height={280} />
         </div>
       </div>
 
-      {/* Team Sales Leaderboard */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
           Sales Team Leaderboard (Q3)

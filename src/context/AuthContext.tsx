@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
+import { decodeJwtPayload } from '../lib/jwt';
 
 interface AuthUser {
   id: string;
@@ -7,6 +8,9 @@ interface AuthUser {
   email: string;
   avatar: string;
   provider: 'google' | 'line' | 'facebook';
+  roleId?: number;
+  permissions?: string[];
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {
@@ -16,6 +20,7 @@ interface AuthContextType {
   loginWithGoogle: (credential: string) => Promise<void>;
   loginWithLine: () => Promise<void>;
   loginWithFacebook: () => Promise<void>;
+  loginWithDemo: (role: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -135,8 +140,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // --- Login handlers ---
 
   const handleLoginResult = useCallback((result: { accessToken: string; refreshToken: string; user: AuthUser }) => {
-    storeSession(result.accessToken, result.refreshToken, result.user);
-    setUser(result.user);
+    const payload = decodeJwtPayload(result.accessToken);
+    const enrichedUser: AuthUser = {
+      ...result.user,
+      roleId: (payload?.role_id as number) ?? undefined,
+      isAdmin: (payload?.role_id as number) === 1,
+    };
+    storeSession(result.accessToken, result.refreshToken, enrichedUser);
+    setUser(enrichedUser);
   }, []);
 
   const loginWithGoogle = useCallback(async (credential: string) => {
@@ -179,6 +190,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setIsLoading(false);
   }, [handleLoginResult]);
+
+  const loginWithDemo = useCallback(async (role: string) => {
+    setIsLoading(true);
+    try {
+      const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/demo', { role });
+      handleLoginResult(res);
+    } catch {
+      // Fallback: offline demo
+      await new Promise(r => setTimeout(r, 400));
+      const roleMap: Record<string, AuthUser> = {
+        admin:   { id: 'demo-admin-001',    name: 'Sarah Connor (Administrator)',  email: 'sarah.connor@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 1, isAdmin: true },
+        manager: { id: 'demo-mgr-001',     name: 'Alex Rivera (Manager)',         email: 'alex.rivera@relateflows.com',   avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 2, isAdmin: false },
+        sales:   { id: 'demo-sales-001',   name: 'Marcus Brody (Sales Rep)',      email: 'marcus.brody@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 3, isAdmin: false },
+        support: { id: 'demo-support-001', name: 'Priya Sharma (Support)',        email: 'priya.sharma@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 4, isAdmin: false },
+        cs_admin:{ id: 'demo-csadmin-001', name: 'Kenji Tanaka (CS Admin)',       email: 'kenji.tanaka@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 5, isAdmin: false },
+      };
+      const authUser = roleMap[role] || roleMap.admin;
+      const fakePayload = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider, role_id: authUser.roleId }));
+      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.fake`;
+      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.refresh-fake`;
+      storeSession(fakeAccess, fakeRefresh, authUser);
+      setUser(authUser);
+    }
+    setIsLoading(false);
+  }, []);
 
   const loginWithFacebook = useCallback(async () => {
     setIsLoading(true);
@@ -236,6 +272,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithGoogle,
         loginWithLine,
         loginWithFacebook,
+        loginWithDemo,
         logout,
       }}
     >
