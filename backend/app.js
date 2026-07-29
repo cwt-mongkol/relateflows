@@ -280,7 +280,7 @@ async function ensureUser(user) {
   try {
     // Check if user was pre-created (invited) by email — prefer invited user by created_at DESC (most recent)
     const existing = await pool.query(`SELECT id, tenant_id, role_id FROM users WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, [user.email]).catch(() => ({ rows: [] }));
-    if (existing.rows.length > 0 && existing.rows[0].tenant_id) {
+    if (existing.rows.length > 0) {
       user.id = existing.rows[0].id;
       user.tenant_id = existing.rows[0].tenant_id;
       if (!user.role_id) user.role_id = existing.rows[0].role_id;
