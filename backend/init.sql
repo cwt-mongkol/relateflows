@@ -683,7 +683,7 @@ ON CONFLICT DO NOTHING;
 
 -- Seed: Primary Owner User
 INSERT INTO users (id, name, email, avatar, provider, role_id, tenant_id, status) VALUES
-    ('admin-primary', 'Owner', 'cwt.mongkol@gmail.com', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', 'google', 2, 'tenant-default-001', 'active')
+    ('admin-primary', 'Owner', 'cwt.mongkol@gmail.com', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', 'google', 1, 'tenant-default-001', 'active')
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed: Default enterprise account
