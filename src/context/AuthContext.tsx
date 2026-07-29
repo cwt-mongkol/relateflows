@@ -31,7 +31,7 @@ interface AuthContextType {
   currentTenantName: string;
   switchTenant: (tenantId: string) => Promise<void>;
   loginWithGoogle: (credential: string) => Promise<void>;
-  loginWithLine: () => Promise<void>;
+  loginWithLine: (code: string) => Promise<void>;
   loginWithFacebook: () => Promise<void>;
   loginWithDemo: (role: string) => Promise<void>;
   logout: () => void;
@@ -150,14 +150,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   }, [handleLoginResult]);
 
-  const loginWithLine = useCallback(async () => {
+  const loginWithLine = useCallback(async (code: string) => {
     setIsLoading(true);
     try {
-      const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/line', {});
+      const redirectUri = window.location.origin;
+      const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/line', { code, redirect_uri: redirectUri });
       handleLoginResult(res);
     } catch (err) {
       console.error('LINE login failed:', err);
-      addToast('LINE login is not available. Please try again later.', 'error');
+      addToast('LINE login failed. Please try again.', 'error');
     }
     setIsLoading(false);
   }, [handleLoginResult]);

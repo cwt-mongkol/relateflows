@@ -5,7 +5,12 @@ import { useGoogleLogin } from '@react-oauth/google';
 import { Shield, Users, Briefcase, Headphones, MessageCircle, Globe, BarChart3, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
 const LINE_CLIENT_ID = import.meta.env.VITE_LINE_CLIENT_ID || '';
-const LINE_LOGIN_URL = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&state=login&scope=profile%20openid%20email`;
+
+// Build LINE OAuth URL dynamically so redirect_uri always matches current origin
+function buildLineLoginUrl(): string {
+  const redirectUri = encodeURIComponent(window.location.origin);
+  return `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${redirectUri}&state=line-login&scope=profile%20openid%20email`;
+}
 
 const DEMO_ROLES = [
   { role: 'admin',   label: 'Administrator',    icon: <Shield className="w-4 h-4" />,     color: 'bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-200' },
@@ -21,7 +26,7 @@ const FEATURES = [
 ];
 
 export const LoginPage: React.FC = () => {
-  const { loginWithGoogle, loginWithLine, loginWithFacebook, loginWithDemo, isLoading } = useAuth();
+  const { loginWithGoogle, loginWithFacebook, loginWithDemo, isLoading } = useAuth();
   const leftRef = useRef<HTMLDivElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const [showDevTools, setShowDevTools] = useState(false);
@@ -43,12 +48,13 @@ export const LoginPage: React.FC = () => {
     return () => el.removeEventListener('mousemove', onMove);
   }, []);
 
-  const handleLineLogin = async () => {
-    if (LINE_CLIENT_ID) {
-      window.location.href = LINE_LOGIN_URL;
+  const handleLineLogin = () => {
+    if (!LINE_CLIENT_ID) {
+      alert('LINE Client ID is not configured.');
       return;
     }
-    await loginWithLine();
+    // Redirect to LINE authorization page — LINE will redirect back to origin?code=xxx&state=line-login
+    window.location.href = buildLineLoginUrl();
   };
 
   const handleFacebookLogin = async () => {

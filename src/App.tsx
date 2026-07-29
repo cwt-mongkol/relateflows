@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import { CRMProvider, useCRM } from './context/CRMContext';
 import { Sidebar } from './components/layout/Sidebar';
@@ -80,7 +80,34 @@ const DashboardApp: React.FC = () => {
 };
 
 export function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loginWithLine } = useAuth();
+  const [lineProcessing, setLineProcessing] = useState(false);
+
+  // LINE OAuth 2.0 Callback Handler
+  // After LINE redirects back to our app with ?code=xxx&state=line-login
+  // we intercept here, send the code to backend, then clean up the URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+
+    if (code && state === 'line-login') {
+      // Clean URL immediately to prevent re-processing on hot reload
+      window.history.replaceState({}, '', window.location.pathname);
+      setLineProcessing(true);
+      loginWithLine(code).finally(() => setLineProcessing(false));
+    }
+  }, [loginWithLine]);
+
+  if (lineProcessing) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-4">
+        <img src="/rf.png?v=1" alt="RelateFlows" className="w-16 h-16 object-contain animate-pulse" />
+        <p className="text-sm font-semibold text-slate-500">กำลังเข้าสู่ระบบด้วย LINE...</p>
+        <span className="loading loading-spinner loading-md text-slate-400" />
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;

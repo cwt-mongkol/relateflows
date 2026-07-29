@@ -388,13 +388,16 @@ app.post('/api/auth/google', async (req, res) => {
 
 // POST /api/auth/line
 app.post('/api/auth/line', async (req, res) => {
-  const { code } = req.body;
+  const { code, redirect_uri } = req.body;
   if (!code) return res.status(400).json({ error: 'Missing LINE authorization code' });
   const lineChannelId = process.env.VITE_LINE_CLIENT_ID || '';
   const lineChannelSecret = process.env.LINE_CHANNEL_SECRET || '';
   if (!lineChannelId || !lineChannelSecret) {
     return res.status(400).json({ error: 'LINE authentication not configured on server' });
   }
+  // redirect_uri MUST exactly match what is registered in LINE Developers Console
+  // and what was used when initiating the OAuth flow
+  const callbackUri = redirect_uri || req.headers.origin || '';
   try {
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
@@ -402,13 +405,14 @@ app.post('/api/auth/line', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: req.headers.origin ? `${req.headers.origin}/login` : `${process.env.VITE_API_URL || ''}/login`,
+        redirect_uri: callbackUri,
         client_id: lineChannelId,
         client_secret: lineChannelSecret,
       }),
     });
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
+      console.error('LINE token exchange error:', errBody);
       return res.status(401).json({ error: 'LINE token exchange failed', detail: errBody });
     }
     const tokenData = await tokenRes.json();
