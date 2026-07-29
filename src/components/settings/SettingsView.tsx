@@ -1,14 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSettings, type IntegrationKeys } from '../../context/SettingsContext';
 import { useCRM } from '../../context/CRMContext';
-import { Palette, CheckCircle2, Save, Globe, Sun, Moon, Monitor, Sliders, Kanban, Plus, X, Edit3, Key, MessageCircle, MessageSquare, Eye, EyeOff, Shield, Users, Radio, Lock } from 'lucide-react';
+import { Bot, Palette, CheckCircle2, Save, Globe, Sun, Moon, Monitor, Sliders, Kanban, Plus, X, Edit3, Key, MessageCircle, MessageSquare, Eye, EyeOff, Shield, Users, Radio, Lock, Building2, Loader2, Database, Mail, Phone, Headphones } from 'lucide-react';
 import { STAGE_COLORS } from '../../data/mockData';
 import type { SettingsTab } from '../../types/crm';
 import { usePermissions } from '../../lib/permissions';
+import { api } from '../../lib/api';
+import type { TenantCompany } from '../../types/crm';
 import { UserManagement } from './UserManagement';
 import { RoleManagement } from './RoleManagement';
 import { ChannelManagement } from './ChannelManagement';
 import { AccessControl } from './AccessControl';
+import { CustomObjectsManager } from './CustomObjectsManager';
+import { ChatbotSettings } from './ChatbotSettings';
+import { CsAdminSettings } from './CsAdminSettings';
+import { LeadAllocationSettings } from './LeadAllocationSettings';
 
 const TABS: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { key: 'general', label: 'General', icon: <Sliders className="w-3.5 h-3.5" /> },
@@ -16,7 +22,12 @@ const TABS: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { key: 'roles', label: 'Roles', icon: <Shield className="w-3.5 h-3.5" /> },
   { key: 'channels', label: 'Channels', icon: <Radio className="w-3.5 h-3.5" /> },
   { key: 'access', label: 'Access', icon: <Lock className="w-3.5 h-3.5" /> },
+  { key: 'chatbot', label: 'Chatbot', icon: <Bot className="w-3.5 h-3.5" /> },
+  { key: 'cs-admin', label: 'CS Admin', icon: <Headphones className="w-3.5 h-3.5" /> },
+  { key: 'lead-allocation', label: 'Lead Allocation', icon: <Users className="w-3.5 h-3.5" /> },
   { key: 'integrations', label: 'Integrations', icon: <Key className="w-3.5 h-3.5" /> },
+  { key: 'companies', label: 'Companies', icon: <Building2 className="w-3.5 h-3.5" /> },
+  { key: 'custom-objects', label: 'Custom Objects', icon: <Database className="w-3.5 h-3.5" /> },
 ];
 
 export const SettingsView: React.FC = () => {
@@ -58,20 +69,17 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 md:p-8 text-white shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-blue-400/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-2">
-            <Sliders className="w-5 h-5 text-blue-300" />
-            <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">Settings</span>
-          </div>
-          <h3 className="text-2xl font-extrabold tracking-tight">{t('settings.title')}</h3>
-          <p className="text-sm text-blue-200 mt-1 max-w-md">{t('settings.subtitle')}</p>
-          <span className="inline-flex items-center gap-1.5 mt-3 text-[10px] font-bold bg-white/15 text-white/90 px-2.5 py-1 rounded-full">
-            <Shield className="w-3 h-3" />
-            {roleName}
-          </span>
+      <div className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-2 mb-2">
+          <Sliders className="w-5 h-5 text-blue-600" />
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Settings</span>
         </div>
+        <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight">{t('settings.title')}</h3>
+        <p className="text-sm text-slate-500 mt-1 max-w-md">{t('settings.subtitle')}</p>
+        <span className="inline-flex items-center gap-1.5 mt-3 text-[10px] font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+          <Shield className="w-3 h-3" />
+          {roleName}
+        </span>
       </div>
 
       {/* Tab Navigation */}
@@ -252,16 +260,13 @@ export const SettingsView: React.FC = () => {
 
       {activeTab === 'integrations' && (
         <>
-          <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 md:p-8 text-white shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-blue-400/20 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10">
-              <div className="flex items-center gap-2 mb-2">
-                <Key className="w-5 h-5 text-yellow-300" />
-                <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">API Credentials</span>
-              </div>
-              <h3 className="text-2xl font-extrabold tracking-tight">{t('integrations.title')}</h3>
-              <p className="text-sm text-blue-200 mt-1 max-w-2xl">{t('integrations.subtitle')}</p>
+          <div className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Key className="w-5 h-5 text-yellow-600" />
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">API Credentials</span>
             </div>
+            <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight">{t('integrations.title')}</h3>
+            <p className="text-sm text-slate-500 mt-1 max-w-2xl">{t('integrations.subtitle')}</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <IntegrationCard icon={<MessageSquare className="w-4 h-4" />} iconBg="bg-red-100 text-red-600" title={t('integrations.google')} desc={t('integrations.google.desc')}
@@ -293,6 +298,243 @@ export const SettingsView: React.FC = () => {
           </div>
         </>
       )}
+
+      {activeTab === 'chatbot' && (
+        <ChatbotSettings />
+      )}
+
+      {activeTab === 'cs-admin' && (
+        <CsAdminSettings />
+      )}
+
+      {activeTab === 'lead-allocation' && (
+        <LeadAllocationSettings />
+      )}
+
+      {activeTab === 'companies' && (
+        <CompanyManager />
+      )}
+
+      {activeTab === 'custom-objects' && (
+        <CustomObjectsManager />
+      )}
+    </div>
+  );
+};
+
+const CompanyManager: React.FC = () => {
+  const { roleId } = usePermissions();
+  const isSuperAdmin = roleId === 1;
+
+  if (isSuperAdmin) return <SuperAdminCompanyManager />;
+  return <CompanyProfile />;
+};
+
+const CompanyProfile: React.FC = () => {
+  const [profile, setProfile] = useState<{ id?: string; name: string; email: string; phone: string; billingPlan: string; status: string; companyCount?: number } | null>(null);
+  const [tenants, setTenants] = useState<TenantCompany[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', phone: '' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [profileData, tenantsData] = await Promise.all([
+        api.get<{ id: string; name: string; email: string; phone: string; billingPlan: string; status: string; companyCount: number }>('/api/enterprise/profile'),
+        api.get<TenantCompany[]>('/api/enterprise/tenants'),
+      ]);
+      setProfile(profileData);
+      setTenants(tenantsData);
+      setForm({ name: profileData.name || '', email: profileData.email || '', phone: profileData.phone || '' });
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const saveProfile = async () => {
+    try {
+      await api.put('/api/enterprise/profile', form);
+      setEditing(false);
+      load();
+    } catch (err) { console.error(err); }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center">
+        <Building2 className="w-10 h-10 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
+        <p className="text-xs font-bold text-slate-500">No enterprise account configured</p>
+        <p className="text-[10px] text-slate-400 mt-1">Contact your administrator</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Enterprise Profile */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h4 className="text-sm font-extrabold text-slate-900">Enterprise Profile</h4>
+            <p className="text-xs text-slate-500 mt-0.5">{profile.billingPlan === 'enterprise' ? 'Enterprise Plan' : 'Free Plan'}</p>
+          </div>
+          <button onClick={() => { setEditing(!editing); if (!editing) setForm({ name: profile.name, email: profile.email, phone: profile.phone }); }}
+            className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-all">
+            {editing ? 'Cancel' : 'Edit'}
+          </button>
+        </div>
+        {editing ? (
+          <div className="space-y-3">
+            <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Company name" className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400" />
+            <input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="Email" className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400" />
+            <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="Phone" className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400" />
+            <button onClick={saveProfile} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all">Save</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 block">Name</span>
+              <span className="font-bold text-slate-800">{profile.name}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 block">Email</span>
+              <span className="font-bold text-slate-800 flex items-center gap-1"><Mail className="w-3 h-3 text-slate-400" />{profile.email || '-'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 block">Phone</span>
+              <span className="font-bold text-slate-800 flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" />{profile.phone || '-'}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Company list */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="p-4 border-b border-slate-100">
+          <h4 className="text-sm font-extrabold text-slate-900">Companies ({tenants.length})</h4>
+        </div>
+        {tenants.length === 0 ? (
+          <div className="p-8 text-center text-slate-400">
+            <Building2 className="w-8 h-8 mx-auto mb-2 stroke-[1.5]" />
+            <p className="text-xs font-medium">No companies</p>
+          </div>
+        ) : tenants.map(t => (
+          <div key={t.id} className="flex items-center gap-3 p-4 border-b border-slate-50">
+            <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+              <Building2 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-slate-900 truncate">{t.name}</p>
+              <p className="text-[10px] text-slate-500">{t.slug}{t.domain ? ` · ${t.domain}` : ''}</p>
+            </div>
+            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${t.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{t.status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const SuperAdminCompanyManager: React.FC = () => {
+  const [companies, setCompanies] = useState<TenantCompany[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', slug: '', domain: '' });
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get<any>('/api/admin/tenants');
+      if (Array.isArray(res)) setCompanies(res);
+      else if (res?.data) setCompanies(res.data);
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async () => {
+    if (!form.name.trim() || !form.slug.trim()) return;
+    setCreating(true);
+    try {
+      const res = await api.post<any>('/api/admin/tenants', form);
+      if (Array.isArray(res)) setCompanies(res);
+      else if (res?.data) { setCompanies(res.data); }
+      setShowForm(false);
+      setForm({ name: '', slug: '', domain: '' });
+      load();
+    } catch {}
+    setCreating(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-extrabold text-slate-900">Companies</h4>
+          <p className="text-xs text-slate-500 mt-0.5">Manage all registered companies/tenants</p>
+        </div>
+        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all">
+          <Plus className="w-3.5 h-3.5" />
+          Create Company
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-blue-50/50 border border-blue-200 rounded-2xl p-5 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Company name *" className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value.replace(/[^a-z0-9-]/g, '') })} placeholder="Slug (e.g. my-company) *" className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input value={form.domain} onChange={e => setForm({ ...form, domain: e.target.value })} placeholder="Domain (optional)" className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={handleCreate} disabled={creating || !form.name.trim() || !form.slug.trim()} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5">
+              {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Create
+            </button>
+            <button onClick={() => setShowForm(false)} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-2 transition-all">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+        {companies.length === 0 ? (
+          <div className="p-8 text-center text-slate-400">
+            <Building2 className="w-8 h-8 mx-auto mb-2 stroke-[1.5]" />
+            <p className="text-xs font-medium">No companies yet</p>
+          </div>
+        ) : companies.map(c => (
+          <div key={c.id} className="flex items-center gap-3 p-4">
+            <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+              <Building2 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-slate-900 truncate">{c.name}</p>
+              <p className="text-[10px] text-slate-500 truncate">{c.slug}{c.domain ? ` · ${c.domain}` : ''}</p>
+            </div>
+            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{c.status}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

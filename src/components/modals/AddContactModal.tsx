@@ -46,20 +46,20 @@ export const AddContactModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-fadeIn">
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden space-y-0">
-        <div className="p-6 bg-gradient-to-r from-blue-900 via-blue-800 to-blue-950 text-white flex items-center justify-between">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
               <UserPlus className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold text-white">Add New Contact</h3>
-              <p className="text-xs text-blue-200">Save lead details to RelateFlows directory</p>
+              <h3 className="text-lg font-extrabold text-slate-900">Add New Contact</h3>
+              <p className="text-xs text-slate-500">Save lead details to directory</p>
             </div>
           </div>
 
           <button
             onClick={() => setIsAddContactModalOpen(false)}
-            className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
           >
             <X className="w-5 h-5" />
           </button>
@@ -167,7 +167,7 @@ export const AddContactModal: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white shadow-md flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white shadow-sm flex items-center gap-2"
             >
               {isSubmitting ? <span className="loading loading-spinner loading-xs" /> : <Plus className="w-4 h-4 stroke-[3]" />}
               <span>{isSubmitting ? 'Saving...' : 'Save Contact'}</span>

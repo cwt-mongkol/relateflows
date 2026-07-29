@@ -2,21 +2,21 @@ import React from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useSettings } from '../../context/SettingsContext';
 import { 
-  Search, 
   Bell, 
-  Plus, 
   Zap, 
   CheckCircle2,
-  Calendar
+  Calendar,
+  Menu
 } from 'lucide-react';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onToggleMobileMenu?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
   const { t } = useSettings();
   const { 
     currentView, 
-    searchQuery, 
-    setSearchQuery, 
-    setIsAddContactModalOpen,
     notificationCount,
     clearNotifications
   } = useCRM();
@@ -37,6 +37,8 @@ export const Header: React.FC = () => {
         return { title: t('page.analytics'), desc: t('page.analytics.desc') };
       case 'calendar':
         return { title: t('page.calendar'), desc: t('page.calendar.desc') };
+      case 'cs-queue':
+        return { title: t('page.csQueue'), desc: t('page.csQueue.desc') };
       case 'settings':
         return { title: t('page.settings'), desc: t('page.settings.desc') };
       default:
@@ -49,44 +51,24 @@ export const Header: React.FC = () => {
   return (
     <header className="bg-white border-b border-slate-200 px-8 py-4 sticky top-0 z-20 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
       {/* Title & View Info */}
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{meta.title}</h2>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggleMobileMenu}
+          className="md:hidden p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-all"
+          aria-label="Toggle menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{meta.title}</h2>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5 font-medium">{meta.desc}</p>
         </div>
-        <p className="text-xs text-slate-500 mt-0.5 font-medium">{meta.desc}</p>
       </div>
 
       {/* Global Actions Bar */}
       <div className="flex items-center gap-3">
-        {/* Search Bar */}
-        <div className="relative w-64 lg:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search deals, contacts, companies..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-          />
-          {searchQuery && (
-            <button 
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 font-bold"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        {/* Quick Add Buttons */}
-        <button
-          onClick={() => setIsAddContactModalOpen(true)}
-          className="hidden sm:flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition-all"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>Add Contact</span>
-        </button>
-
         {/* Notification Bell */}
         <div className="dropdown dropdown-end">
           <button 
@@ -106,13 +88,13 @@ export const Header: React.FC = () => {
             className="dropdown-content z-[100] menu p-4 shadow-xl bg-white rounded-2xl border border-slate-100 w-80 mt-2 space-y-3"
           >
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h4 className="font-bold text-sm text-slate-900">Notifications</h4>
+              <h4 className="font-bold text-sm text-slate-900">{t('header.notifications')}</h4>
               {notificationCount > 0 && (
                 <button 
                   onClick={clearNotifications}
                   className="text-[11px] text-blue-600 hover:underline font-semibold"
                 >
-                  Mark all as read
+                  {t('header.markAllRead')}
                 </button>
               )}
             </div>
@@ -121,8 +103,8 @@ export const Header: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100 flex items-start gap-2.5">
                 <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-semibold text-slate-800">Deal Closed Won!</p>
-                  <p className="text-slate-500 text-[11px]">Vanguard Pay signed contract ($210,000 ARR).</p>
+                  <p className="font-semibold text-slate-800">{t('header.notif.dealWon')}</p>
+                  <p className="text-slate-500 text-[11px]">{t('header.notif.dealWonDesc')}</p>
                   <span className="text-[10px] text-blue-600 font-medium mt-1 inline-block">10m ago</span>
                 </div>
               </div>
@@ -130,8 +112,8 @@ export const Header: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-yellow-50 border border-yellow-100 flex items-start gap-2.5">
                 <Zap className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-semibold text-slate-800">RelateFlows Automation</p>
-                  <p className="text-slate-500 text-[11px]">Lead score trigger escalated David Miller (Apex Global).</p>
+                  <p className="font-semibold text-slate-800">{t('header.notif.automation')}</p>
+                  <p className="text-slate-500 text-[11px]">{t('header.notif.automationDesc')}</p>
                   <span className="text-[10px] text-yellow-600 font-medium mt-1 inline-block">1h ago</span>
                 </div>
               </div>
@@ -139,8 +121,8 @@ export const Header: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-slate-50 flex items-start gap-2.5">
                 <Calendar className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-semibold text-slate-800">Meeting Reminder</p>
-                  <p className="text-slate-500 text-[11px]">Contract review with Catherine Hayes tomorrow at 10 AM.</p>
+                  <p className="font-semibold text-slate-800">{t('header.notif.meeting')}</p>
+                  <p className="text-slate-500 text-[11px]">{t('header.notif.meetingDesc')}</p>
                   <span className="text-[10px] text-slate-400 font-medium mt-1 inline-block">3h ago</span>
                 </div>
               </div>

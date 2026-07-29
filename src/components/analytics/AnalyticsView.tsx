@@ -1,5 +1,6 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import Chart from 'react-apexcharts';
 import type {} from 'apexcharts';
 import {
@@ -10,6 +11,7 @@ import {
 
 export const AnalyticsView: React.FC = () => {
   const { isLoading, deals } = useCRM();
+  const { t } = useSettings();
 
   const totalValue = deals.reduce((acc, d) => acc + d.value, 0);
   const wonDeals = deals.filter(d => d.stage === 'closed_won');
@@ -79,34 +81,34 @@ export const AnalyticsView: React.FC = () => {
     <div className="space-y-6 animate-fadeIn">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Pipeline ARR</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('analytics.totalArr')}</span>
           <h3 className="text-2xl font-extrabold text-slate-900 mt-1">${totalValue.toLocaleString()}</h3>
           <p className="text-xs text-blue-600 font-semibold mt-1 flex items-center gap-1">
-            <ArrowUpRight className="w-3.5 h-3.5" /> +18.4% YoY Growth
+            <ArrowUpRight className="w-3.5 h-3.5" /> {t('analytics.yoyGrowth')}
           </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Closed Won Revenue</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('analytics.closedWon')}</span>
           <h3 className="text-2xl font-extrabold text-slate-900 mt-1">${wonValue.toLocaleString()}</h3>
           <p className="text-xs text-emerald-600 font-semibold mt-1 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> 60% of Q3 Target
+            <CheckCircle2 className="w-3.5 h-3.5" /> {t('analytics.q3Target')}
           </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Overall Win Rate</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('analytics.winRate')}</span>
           <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{winRate}%</h3>
           <p className="text-xs text-yellow-600 font-semibold mt-1 flex items-center gap-1">
-            <Target className="w-3.5 h-3.5 text-yellow-500" /> Benchmark: 25%
+            <Target className="w-3.5 h-3.5 text-yellow-500" /> {t('analytics.benchmark')}
           </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Sales Cycle Length</span>
-          <h3 className="text-2xl font-extrabold text-slate-900 mt-1">21 Days</h3>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('analytics.cycleLength')}</span>
+          <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{t('analytics.cycleDays')}</h3>
           <p className="text-xs text-blue-600 font-semibold mt-1">
-            4 days faster with RelateFlows
+            {t('analytics.faster')}
           </p>
         </div>
       </div>
@@ -115,11 +117,11 @@ export const AnalyticsView: React.FC = () => {
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Monthly Revenue & Forecast</h3>
-              <p className="text-xs text-slate-500">Historical performance & Q3 forecast breakdown</p>
+              <h3 className="text-base font-bold text-slate-900">{t('analytics.monthlyRevenue')}</h3>
+              <p className="text-xs text-slate-500">{t('analytics.monthlyRevenue.desc')}</p>
             </div>
             <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
-              Q3 2026
+              {t('analytics.q3')}
             </span>
           </div>
 
@@ -128,7 +130,7 @@ export const AnalyticsView: React.FC = () => {
 
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
           <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
-            Lead Source Attribution
+            {t('analytics.leadSource')}
           </h3>
 
           <Chart options={pieOptions} series={pieSeries} type="donut" height={280} />
@@ -137,7 +139,7 @@ export const AnalyticsView: React.FC = () => {
 
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
-          Sales Team Leaderboard (Q3)
+          {t('analytics.leaderboard')}
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -161,7 +163,7 @@ export const AnalyticsView: React.FC = () => {
 
               <div className="text-right">
                 <p className="text-sm font-extrabold text-slate-900">{member.won}</p>
-                <p className="text-[10px] text-emerald-600 font-bold">{member.count} deals won</p>
+                <p className="text-[10px] text-emerald-600 font-bold">{t('analytics.dealsWon').replace('{count}', String(member.count))}</p>
               </div>
             </div>
           ))}

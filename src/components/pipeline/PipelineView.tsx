@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import Chart from 'react-apexcharts';
 import type { DealStage } from '../../types/crm';
 import { Plus, Filter, Building2, GripVertical, LayoutPanelTop, GanttChartSquare, CalendarDays, CalendarRange, ZoomIn, ZoomOut } from 'lucide-react';
@@ -12,14 +13,6 @@ const ZOOM_ICONS: Record<ZoomLevel, React.ReactNode> = {
   month: <CalendarRange className="w-3.5 h-3.5" />,
   year: <ZoomOut className="w-3.5 h-3.5" />,
   all: <ZoomOut className="w-3.5 h-3.5" />,
-};
-
-const ZOOM_LABELS: Record<ZoomLevel, string> = {
-  day: 'Day',
-  week: 'Week',
-  month: 'Month',
-  year: 'Year',
-  all: 'All',
 };
 
 function fmt(d: Date): string {
@@ -38,6 +31,7 @@ const BADGE_COLORS: Record<string, string> = {
 
 export const PipelineView: React.FC = () => {
   const { isLoading, deals, stages, updateDealStage, deleteDeal, setIsAddDealModalOpen, setSelectedDeal, searchQuery } = useCRM();
+  const { t } = useSettings();
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'gantt'>('kanban');
@@ -45,11 +39,9 @@ export const PipelineView: React.FC = () => {
 
   const filteredDeals = deals.filter((deal) => {
     if (priorityFilter !== 'all' && deal.priority !== priorityFilter) return false;
-    if (searchQuery && !deal.title.toLowerCase().includes(searchQuery.toLowerCase()) && !deal.company.toLowerCase().includes(searchQuery.toLowerCase()) && !deal.contactName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (searchQuery && !deal.title.toLowerCase().includes(searchQuery.toLowerCase()) && !deal.company.toLowerCase().includes(searchQuery.toLowerCase()) && !(deal.contactName || '').toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
-
-  const totalValue = filteredDeals.reduce((sum, d) => sum + d.value, 0);
 
   const handleDragStart = (e: React.DragEvent, dealId: string) => {
     e.dataTransfer.setData('text/plain', dealId);
@@ -80,7 +72,7 @@ export const PipelineView: React.FC = () => {
 
     filteredDeals.forEach(deal => {
       const start = new Date(deal.createdAt).getTime();
-      const end = new Date(deal.expectedCloseDate).getTime();
+      const end = deal.expectedCloseDate ? new Date(deal.expectedCloseDate).getTime() : start;
 
       const stageIndex = sortedStages.findIndex(s => s.id === deal.stage);
       const progress = sortedStages.length > 0 ? (stageIndex + 1) / sortedStages.length : 0.5;
@@ -92,7 +84,7 @@ export const PipelineView: React.FC = () => {
       actualData.push({ x: deal.title, y: [start, Math.max(start, actualEnd)], fillColor: stageColor });
     });
 
-    const allDates = filteredDeals.flatMap(d => [new Date(d.createdAt).getTime(), new Date(d.expectedCloseDate).getTime()]);
+    const allDates = filteredDeals.flatMap(d => [new Date(d.createdAt).getTime(), d.expectedCloseDate ? new Date(d.expectedCloseDate).getTime() : new Date(d.createdAt).getTime()]);
     const minDate = allDates.length > 0 ? Math.min(...allDates) : Date.now();
     const maxDate = allDates.length > 0 ? Math.max(...allDates) : Date.now();
     const totalSpan = maxDate - minDate;
@@ -188,7 +180,7 @@ export const PipelineView: React.FC = () => {
           if (!dp) return '';
           const start = new Date(dp.y[0]);
           const end = new Date(dp.y[1]);
-          const label = seriesIndex === 0 ? 'Plan' : 'Actual';
+          const label = seriesIndex === 0 ? t('pipeline.plan') : t('pipeline.actual');
           const deal = filteredDeals.find(d => d.title === dp.x);
           return `<div class="p-3 text-xs space-y-1.5" style="font-family:inherit;min-width:200px">
             <div class="font-bold text-slate-900 text-sm">${dp.x}</div>
@@ -198,10 +190,10 @@ export const PipelineView: React.FC = () => {
               <span>${fmtFull(start)} – ${fmtFull(end)}</span>
             </div>
             ${deal ? `<div class="border-t border-slate-100 pt-1.5 mt-1.5 space-y-1">
-              <div class="flex justify-between text-slate-600"><span>Company</span><span class="font-bold text-slate-900">${deal.company}</span></div>
-              <div class="flex justify-between text-slate-600"><span>Value</span><span class="font-bold text-blue-600">$${deal.value.toLocaleString()}</span></div>
-              <div class="flex justify-between text-slate-600"><span>Contact</span><span class="font-semibold text-slate-900">${deal.contactName}</span></div>
-              <div class="flex justify-between text-slate-600"><span>Stage</span><span class="font-semibold text-slate-900">${stages.find(s => s.id === deal.stage)?.label || deal.stage}</span></div>
+              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.company')}</span><span class="font-bold text-slate-900">${deal.company}</span></div>
+              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.value')}</span><span class="font-bold text-blue-600">$${deal.value.toLocaleString()}</span></div>
+              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.contact')}</span><span class="font-semibold text-slate-900">${deal.contactName}</span></div>
+              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.stage')}</span><span class="font-semibold text-slate-900">${stages.find(s => s.id === deal.stage)?.label || deal.stage}</span></div>
             </div>` : ''}
           </div>`;
         },
@@ -219,8 +211,8 @@ export const PipelineView: React.FC = () => {
       },
       colors: ['#cbd5e1', '#1D4ED8'],
       series: [
-        { name: 'Plan', data: planData },
-        { name: 'Actual', data: actualData },
+        { name: t('pipeline.plan'), data: planData },
+        { name: t('pipeline.actual'), data: actualData },
       ],
     };
   }, [stages, filteredDeals, zoomLevel, setSelectedDeal]);
@@ -243,9 +235,9 @@ export const PipelineView: React.FC = () => {
       {/* Header */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h3 className="text-lg font-extrabold text-slate-900">Sales Pipeline</h3>
+          <h3 className="text-lg font-extrabold text-slate-900">{t('pipeline.title')}</h3>
           <p className="text-xs text-slate-500">
-            {filteredDeals.length} deals &middot; ${totalValue.toLocaleString()} total &middot; {stages.length} stages
+            {t('pipeline.desc')}
           </p>
         </div>
 
@@ -259,7 +251,7 @@ export const PipelineView: React.FC = () => {
               }`}
             >
               <LayoutPanelTop className="w-3.5 h-3.5" />
-              <span>Kanban</span>
+              <span>{t('pipeline.viewToggle.kanban')}</span>
             </button>
             <button
               onClick={() => setViewMode('gantt')}
@@ -268,7 +260,7 @@ export const PipelineView: React.FC = () => {
               }`}
             >
               <GanttChartSquare className="w-3.5 h-3.5" />
-              <span>Gantt</span>
+              <span>{t('pipeline.viewToggle.gantt')}</span>
             </button>
           </div>
 
@@ -280,19 +272,19 @@ export const PipelineView: React.FC = () => {
               onChange={(e) => setPriorityFilter(e.target.value)}
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
             >
-              <option value="all">All</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              <option value="all">{t('pipeline.zoom.all')}</option>
+              <option value="high">{t('pipeline.filter.high')}</option>
+              <option value="medium">{t('pipeline.filter.medium')}</option>
+              <option value="low">{t('pipeline.filter.low')}</option>
             </select>
           </div>
 
           <button
             onClick={() => setIsAddDealModalOpen(true)}
-            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md rf-yellow-glow flex items-center gap-1.5 transition-all hover:scale-105"
+            className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Add Deal</span>
+            <span>{t('pipeline.addDeal')}</span>
           </button>
         </div>
       </div>
@@ -303,12 +295,12 @@ export const PipelineView: React.FC = () => {
           {/* Gantt Header */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Deal Timeline (Gantt)</h3>
-              <p className="text-xs text-slate-500">Click a bar to view deal details · Plan (gray) vs Actual (colored) by stage progress</p>
+              <h3 className="text-base font-bold text-slate-900">{t('pipeline.gantt')}</h3>
+              <p className="text-xs text-slate-500">{t('pipeline.gantt.desc')}</p>
             </div>
             {/* Zoom Controls */}
             <div className="bg-slate-100 rounded-xl p-1 flex items-center gap-0.5">
-              {(Object.keys(ZOOM_LABELS) as ZoomLevel[]).map(level => (
+              {(Object.keys(ZOOM_ICONS) as ZoomLevel[]).map(level => (
                 <button
                   key={level}
                   onClick={() => setZoomLevel(level)}
@@ -317,7 +309,7 @@ export const PipelineView: React.FC = () => {
                   }`}
                 >
                   {ZOOM_ICONS[level]}
-                  <span>{ZOOM_LABELS[level]}</span>
+                  <span>{t('pipeline.zoom.' + level)}</span>
                 </button>
               ))}
             </div>
@@ -325,7 +317,7 @@ export const PipelineView: React.FC = () => {
 
           {filteredDeals.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-slate-400 text-sm font-medium">
-              No deals to display
+              {t('pipeline.noDeals')}
             </div>
           ) : (
             <Chart
@@ -340,14 +332,14 @@ export const PipelineView: React.FC = () => {
           <div className="flex items-center gap-6 mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
             <div className="flex items-center gap-2">
               <span className="inline-block w-3 h-3 rounded-sm bg-slate-300" />
-              <span>Plan (full timeline)</span>
+              <span>{t('pipeline.plan')}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-block w-3 h-3 rounded-sm bg-blue-600" />
-              <span>Actual (stage progress)</span>
+              <span>{t('pipeline.actual')}</span>
             </div>
             <span className="text-slate-300">|</span>
-            <span>Progress = current stage position / total stages</span>
+            <span>{t('pipeline.progress')}</span>
           </div>
         </div>
       ) : (
@@ -380,7 +372,7 @@ export const PipelineView: React.FC = () => {
                 <div className={`flex-1 rounded-2xl border border-slate-200/80 bg-slate-50/50 p-2.5 space-y-2.5 transition-colors ${draggingId ? 'ring-2 ring-blue-400/30' : ''}`}>
                   {stageDeals.length === 0 ? (
                     <div className="h-24 border-2 border-dashed border-slate-200/60 rounded-xl flex items-center justify-center text-slate-400 text-xs font-medium">
-                      Drop deals here
+                      {t('pipeline.dropHere')}
                     </div>
                   ) : (
                     stageDeals.map((deal) => (
@@ -423,7 +415,7 @@ export const PipelineView: React.FC = () => {
                           <div className="flex items-center justify-between pt-1.5 border-t border-slate-100">
                             <div className="flex items-center gap-1.5">
                               <img src={deal.owner.avatar} alt={deal.owner.name} className="w-5 h-5 rounded-full object-cover ring-1 ring-slate-200" />
-                              <span className="text-[10px] text-slate-500 font-medium truncate max-w-[80px]">{deal.contactName.split(' ')[0]}</span>
+                              <span className="text-[10px] text-slate-500 font-medium truncate max-w-[80px]">{(deal.contactName || '').split(' ')[0]}</span>
                             </div>
                             <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${BADGE_COLORS[deal.priority] || 'bg-slate-100 text-slate-500'}`}>
                               {deal.priority}

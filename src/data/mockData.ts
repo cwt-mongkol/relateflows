@@ -42,6 +42,9 @@ export const INITIAL_LEADS: Lead[] = [
   { id: 'LD-007', name: 'วนิดา รักดี', avatar: 'https://i.pravatar.cc/150?u=wanida', channel: 'line', socialAccountId: 'line-main', lastMessage: 'อยากได้แบบ 3 ห้องนอน 2 ห้องน้ำ ค่ะ', lastMessageTime: '28 min ago', unreadCount: 2, isAllocated: false, createdAt: '2026-07-22' },
   { id: 'LD-008', name: 'somchai_p', avatar: 'https://i.pravatar.cc/150?u=somchai_p', channel: 'facebook', socialAccountId: 'fb-th', lastMessage: 'ราคาห้องแบบ 2 Bedroom เท่าไหร่ครับ', lastMessageTime: '42 min ago', unreadCount: 1, isAllocated: false, createdAt: '2026-07-22' },
   { id: 'LD-009', name: 'คุณหญิงรัตนา', avatar: 'https://i.pravatar.cc/150?u=ratana', channel: 'line', socialAccountId: 'line-sales', lastMessage: 'ดิฉันสะดวกเข้าชมโครงการวันเสาร์นี้ค่ะ', lastMessageTime: '50 min ago', unreadCount: 3, isAllocated: true, assignedTo: 'demo-mgr-001', createdAt: '2026-07-21' },
+  // No tags (for demoing untagged leads)
+  { id: 'LD-010', name: 'Thanh Nguyen', avatar: 'https://i.pravatar.cc/150?u=thanh', channel: 'facebook', socialAccountId: 'fb-main', lastMessage: 'Can I get a refund?', lastMessageTime: '5 min ago', unreadCount: 1, isAllocated: false, createdAt: '2026-07-25' },
+  { id: 'LD-011', name: 'fit_girl_88', avatar: 'https://i.pravatar.cc/150?u=fitgirl', channel: 'instagram', socialAccountId: 'ig-main', lastMessage: 'How long does shipping take?', lastMessageTime: '12 min ago', unreadCount: 1, isAllocated: false, createdAt: '2026-07-25' },
 ];
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
@@ -112,6 +115,16 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   { id: 'MSG-048', channel: 'line', leadId: 'LD-009', from: 'contact', senderName: 'คุณหญิงรัตนา', senderAvatar: 'https://i.pravatar.cc/150?u=ratana', content: 'สนใจมากค่ะ ขอเอกสารเพิ่มเติมเกี่ยวกับสิทธิประโยชน์ค่ะ', timestamp: '1 hour ago', isRead: false },
   { id: 'MSG-049', channel: 'line', leadId: 'LD-009', from: 'contact', senderName: 'คุณหญิงรัตนา', senderAvatar: 'https://i.pravatar.cc/150?u=ratana', content: 'และขอใบเสนอราคาอย่างเป็นทางการด้วยนะคะ', timestamp: '1 hour ago', isRead: false },
   { id: 'MSG-050', channel: 'line', leadId: 'LD-009', from: 'contact', senderName: 'คุณหญิงรัตนา', senderAvatar: 'https://i.pravatar.cc/150?u=ratana', content: 'ดิฉันสะดวกเข้าชมโครงการวันเสาร์นี้ค่ะ', timestamp: '1 hour ago', isRead: false },
+
+  // === LD-010: Thanh Nguyen (Facebook) — no tags ===
+  { id: 'MSG-051', channel: 'facebook', leadId: 'LD-010', from: 'contact', senderName: 'Thanh Nguyen', senderAvatar: 'https://i.pravatar.cc/150?u=thanh', content: 'Hi, I ordered the premium plan but I want a refund', timestamp: '6 min ago', isRead: true },
+  { id: 'MSG-052', channel: 'facebook', leadId: 'LD-010', from: 'agent', senderName: 'คุณ Sarah', senderAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150', content: 'Hi Thanh! Sorry to hear that. Let me check your account and help process the refund. Can you share your order ID?', timestamp: '5 min ago', isRead: true },
+  { id: 'MSG-053', channel: 'facebook', leadId: 'LD-010', from: 'contact', senderName: 'Thanh Nguyen', senderAvatar: 'https://i.pravatar.cc/150?u=thanh', content: 'Can I get a refund?', timestamp: '5 min ago', isRead: false },
+
+  // === LD-011: fit_girl_88 (Instagram) — no tags ===
+  { id: 'MSG-054', channel: 'instagram', leadId: 'LD-011', from: 'contact', senderName: 'fit_girl_88', senderAvatar: 'https://i.pravatar.cc/150?u=fitgirl', content: 'Hey! Your product looks amazing!', timestamp: '15 min ago', isRead: true },
+  { id: 'MSG-055', channel: 'instagram', leadId: 'LD-011', from: 'agent', senderName: 'คุณ Alex', senderAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', content: 'Thanks! Let us know if you have any questions 😊', timestamp: '12 min ago', isRead: true },
+  { id: 'MSG-056', channel: 'instagram', leadId: 'LD-011', from: 'contact', senderName: 'fit_girl_88', senderAvatar: 'https://i.pravatar.cc/150?u=fitgirl', content: 'How long does shipping take?', timestamp: '15 min ago', isRead: false },
 ];
 
 export const INITIAL_CATEGORIES: Category[] = [

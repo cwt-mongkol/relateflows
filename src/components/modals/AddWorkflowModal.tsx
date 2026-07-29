@@ -37,20 +37,20 @@ export const AddWorkflowModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-fadeIn">
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden space-y-0">
-        <div className="p-6 bg-gradient-to-r from-blue-800 via-blue-700 to-yellow-800 text-white flex items-center justify-between">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-yellow-500 text-white flex items-center justify-center font-bold shadow-md rf-yellow-glow">
-              <Zap className="w-5 h-5 fill-current" />
+            <div className="w-10 h-10 rounded-xl bg-yellow-50 text-yellow-700 flex items-center justify-center font-bold">
+              <Zap className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold text-white">Create RelateFlows Rule</h3>
-              <p className="text-xs text-blue-100">Set up new trigger and action workflow</p>
+              <h3 className="text-lg font-extrabold text-slate-900">Create Workflow Rule</h3>
+              <p className="text-xs text-slate-500">Set up trigger and action workflow</p>
             </div>
           </div>
 
           <button
             onClick={() => setIsAddWorkflowModalOpen(false)}
-            className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
           >
             <X className="w-5 h-5" />
           </button>
@@ -131,7 +131,7 @@ export const AddWorkflowModal: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-400 disabled:cursor-not-allowed text-white shadow-md rf-yellow-glow flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white shadow-sm flex items-center gap-2"
             >
               {isSubmitting ? <span className="loading loading-spinner loading-xs" /> : <Zap className="w-4 h-4 fill-current" />}
               <span>{isSubmitting ? 'Enabling...' : 'Enable Workflow'}</span>

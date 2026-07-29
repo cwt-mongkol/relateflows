@@ -28,29 +28,27 @@ export const WorkflowsView: React.FC = () => {
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* Top Engine Overview Banner */}
-      <div className="bg-gradient-to-r from-blue-900 via-blue-800 to-blue-950 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="absolute right-0 top-0 -mt-10 -mr-10 w-72 h-72 bg-blue-400/15 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="space-y-2 max-w-xl relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-yellow-300 text-xs font-semibold backdrop-blur-md border border-white/10">
-            <Zap className="w-3.5 h-3.5 fill-current text-yellow-400" />
+      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-2 max-w-xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-200">
+            <Zap className="w-3.5 h-3.5 fill-current text-amber-500" />
             RelateFlows Smart Automation Engine
           </div>
-          <h2 className="text-2xl font-extrabold tracking-tight">Automate Sales & Lead Workflows</h2>
-          <p className="text-blue-100 text-xs leading-relaxed">
+          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Automate Sales & Lead Workflows</h2>
+          <p className="text-slate-500 text-xs leading-relaxed">
             Eliminate repetitive tasks. Automatically route deals, send onboarding emails, escalate high-score leads, and trigger Slack notifications.
           </p>
         </div>
 
-        <div className="flex items-center gap-4 relative z-10 shrink-0">
+        <div className="flex items-center gap-4 shrink-0">
           <div className="text-right hidden sm:block">
-            <p className="text-xs text-blue-200 font-semibold">Total Execution Runs</p>
-            <p className="text-2xl font-extrabold text-yellow-300">{totalExecutions.toLocaleString()}</p>
+            <p className="text-xs text-slate-400 font-semibold">Total Execution Runs</p>
+            <p className="text-2xl font-extrabold text-blue-600">{totalExecutions.toLocaleString()}</p>
           </div>
 
           <button
             onClick={() => setIsAddWorkflowModalOpen(true)}
-            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-3 rounded-2xl text-xs shadow-lg rf-yellow-glow flex items-center gap-2 transition-all hover:scale-105"
+            className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition-all"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
             <span>Create Workflow</span>

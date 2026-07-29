@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import type { LifecycleStage } from '../../types/crm';
 import { 
   Plus, 
@@ -11,6 +12,7 @@ import {
 
 export const ContactsView: React.FC = () => {
   const { isLoading, contacts, searchQuery, setSelectedContact, setIsAddContactModalOpen } = useCRM();
+  const { t } = useSettings();
   const [stageFilter, setStageFilter] = useState<string>('all');
 
   const filteredContacts = contacts.filter((c) => {
@@ -50,9 +52,9 @@ export const ContactsView: React.FC = () => {
       {/* Header & Filter Controls */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h3 className="text-lg font-extrabold text-slate-900">Contacts & Accounts Directory</h3>
+          <h3 className="text-lg font-extrabold text-slate-900">{t('contacts.directory')}</h3>
           <p className="text-xs text-slate-500">
-            Total Contacts: <span className="font-bold text-slate-800">{filteredContacts.length}</span> • High Lead Score (&gt;80): <span className="font-bold text-yellow-600">{contacts.filter(c => c.leadScore > 80).length} contacts</span>
+            {t('contacts.total').replace('{count}', String(filteredContacts.length)).replace('{high}', String(contacts.filter(c => c.leadScore > 80).length))}
           </p>
         </div>
 
@@ -60,27 +62,27 @@ export const ContactsView: React.FC = () => {
           {/* Lifecycle Filter */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-500">Stage:</span>
+            <span className="text-slate-500">{t('contacts.stage')}:</span>
             <select
               value={stageFilter}
               onChange={(e) => setStageFilter(e.target.value)}
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
             >
-              <option value="all">All Stages</option>
-              <option value="customer">Customers</option>
-              <option value="opportunity">Opportunities</option>
-              <option value="sql">SQL (Sales Qualified)</option>
-              <option value="mql">MQL (Marketing Qualified)</option>
-              <option value="lead">Leads</option>
+              <option value="all">{t('contacts.stage.all')}</option>
+              <option value="customer">{t('contacts.stage.customers')}</option>
+              <option value="opportunity">{t('contacts.stage.opportunities')}</option>
+              <option value="sql">{t('contacts.stage.sql')}</option>
+              <option value="mql">{t('contacts.stage.mql')}</option>
+              <option value="lead">{t('contacts.stage.leads')}</option>
             </select>
           </div>
 
           <button
             onClick={() => setIsAddContactModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md flex items-center gap-1.5 transition-all hover:scale-105"
+            className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Add Contact</span>
+            <span>{t('contacts.addContact')}</span>
           </button>
         </div>
       </div>
@@ -91,13 +93,13 @@ export const ContactsView: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                <th className="py-3.5 px-5">Contact Name & Role</th>
-                <th className="py-3.5 px-4">Company</th>
-                <th className="py-3.5 px-4">Lifecycle Stage</th>
-                <th className="py-3.5 px-4">Lead Score</th>
-                <th className="py-3.5 px-4">Total Value</th>
-                <th className="py-3.5 px-4">Last Contacted</th>
-                <th className="py-3.5 px-5 text-right">Actions</th>
+                <th className="py-3.5 px-5">{t('contacts.table.name')}</th>
+                <th className="py-3.5 px-4">{t('contacts.table.company')}</th>
+                <th className="py-3.5 px-4">{t('contacts.table.stage')}</th>
+                <th className="py-3.5 px-4">{t('contacts.table.score')}</th>
+                <th className="py-3.5 px-4">{t('contacts.table.value')}</th>
+                <th className="py-3.5 px-4">{t('contacts.table.contacted')}</th>
+                <th className="py-3.5 px-5 text-right">{t('contacts.table.actions')}</th>
               </tr>
             </thead>
 
@@ -105,7 +107,7 @@ export const ContactsView: React.FC = () => {
               {filteredContacts.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
-                    No contacts found matching your query.
+                    {t('contacts.empty')}
                   </td>
                 </tr>
               ) : (
@@ -188,7 +190,7 @@ export const ContactsView: React.FC = () => {
                         }}
                         className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200"
                       >
-                        <span>View Profile</span>
+                        <span>{t('contacts.viewProfile')}</span>
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </td>

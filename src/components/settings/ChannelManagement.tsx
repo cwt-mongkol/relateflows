@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import type { SocialChannel } from '../../types/crm';
-import { MessageCircle, Globe, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { MessageCircle, Globe, Plus, RefreshCw, Trash2, ExternalLink } from 'lucide-react';
 
 const platformIcons: Record<string, React.ReactNode> = {
   facebook: <Globe className="w-4 h-4" />,
@@ -87,6 +87,38 @@ export const ChannelManagement: React.FC = () => {
       ))}
       {showAdd ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+          {/* OAuth Connect Buttons */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Connect via OAuth</p>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.get<{ url: string }>('/api/channels/facebook/auth-url');
+                    window.open(res.url, '_blank', 'width=800,height=700');
+                  } catch (err) { console.error(err); }
+                }}
+                className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2.5 rounded-lg transition-all"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Connect Facebook
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.get<{ url: string }>('/api/channels/line/auth-url');
+                    window.open(res.url, '_blank', 'width=600,height=700');
+                  } catch (err) { console.error(err); }
+                }}
+                className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-3 py-2.5 rounded-lg transition-all"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Connect LINE
+              </button>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
+            <div className="relative flex justify-center"><span className="bg-white px-2 text-[10px] text-slate-400 font-bold">or manual entry</span></div>
+          </div>
           <select
             value={form.type}
             onChange={e => setForm(prev => ({ ...prev, type: e.target.value as SocialChannel['type'] }))}

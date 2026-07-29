@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import { decodeJwtPayload } from '../lib/jwt';
+import { useToast } from './ToastContext';
 
 interface AuthUser {
   id: string;
@@ -11,12 +12,24 @@ interface AuthUser {
   roleId?: number;
   permissions?: string[];
   isAdmin?: boolean;
+  tenantId?: string;
+}
+
+interface TenantInfo {
+  tenantId: string;
+  name: string;
+  slug: string;
+  status: string;
+  isDefault: boolean;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  userTenants: TenantInfo[];
+  currentTenantName: string;
+  switchTenant: (tenantId: string) => Promise<void>;
   loginWithGoogle: (credential: string) => Promise<void>;
   loginWithLine: () => Promise<void>;
   loginWithFacebook: () => Promise<void>;
@@ -31,28 +44,6 @@ const INACTIVITY_CHECK_INTERVAL_MS = 60 * 1000; // check every 60s
 
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'click', 'keydown', 'touchstart', 'touchmove', 'scroll', 'wheel'];
 
-const DEMO_USER: AuthUser = {
-  id: 'demo-001',
-  name: 'Sarah Connor',
-  email: 'sarah.connor@relateflows.com',
-  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-  provider: 'google',
-};
-
-function decodeGoogleCredential(credential: string): AuthUser {
-  try {
-    const payload = JSON.parse(atob(credential.split('.')[1]));
-    return {
-      id: payload.sub,
-      name: payload.name || 'Google User',
-      email: payload.email || '',
-      avatar: payload.picture || '',
-      provider: 'google',
-    };
-  } catch {
-    return DEMO_USER;
-  }
-}
 
 function storeSession(accessToken: string, refreshToken: string, userData: AuthUser) {
   localStorage.setItem('rf-access-token', accessToken);
@@ -67,6 +58,7 @@ function clearSession() {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { addToast } = useToast();
   const lastActivity = useRef<number>(0);
   const [user, setUser] = useState<AuthUser | null>(() => {
     const cached = localStorage.getItem('rf-user');
@@ -77,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [isLoading, setIsLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [userTenants, setUserTenants] = useState<TenantInfo[]>([]);
 
   // --- Activity tracking ---
   const updateActivity = useCallback(() => {
@@ -96,14 +89,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const interval = setInterval(() => {
       const elapsed = Date.now() - lastActivity.current;
       if (elapsed >= INACTIVITY_TIMEOUT_MS) {
-        // Inactivity timeout — logout
         const rt = api.getRefreshToken();
         if (rt) {
-          fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/logout`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken: rt }),
-          }).catch(() => {/* logout API failure is non-critical */});
+          api.post('/api/auth/logout', { refreshToken: rt }).catch(() => {});
         }
         clearSession();
         setUser(null);
@@ -122,11 +110,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setInitialized(true);
         return;
       }
-      // Try to verify with backend
       try {
-        const data = await api.get<AuthUser>('/api/auth/me');
-        setUser(data);
-        localStorage.setItem('rf-user', JSON.stringify(data));
+        const data = await api.get<AuthUser & { tenantId?: string }>('/api/auth/me');
+        const enriched = { ...data, tenantId: data.tenantId };
+        setUser(enriched);
+        localStorage.setItem('rf-user', JSON.stringify(enriched));
+        // Load accessible tenants
+        loadUserTenants();
       } catch (err) {
         console.warn('Token verification failed, clearing session:', err);
         clearSession();
@@ -136,8 +126,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     verify();
   }, []);
-
-  // --- Login handlers ---
 
   const handleLoginResult = useCallback((result: { accessToken: string; refreshToken: string; user: AuthUser }) => {
     const payload = decodeJwtPayload(result.accessToken);
@@ -155,15 +143,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/google', { credential });
       handleLoginResult(res);
-    } catch {
-      // Demo fallback
-      await new Promise(r => setTimeout(r, 600));
-      const authUser = credential === 'demo' ? DEMO_USER : decodeGoogleCredential(credential);
-      const fakePayload = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider }));
-      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.fake`;
-      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.refresh-fake`;
-      storeSession(fakeAccess, fakeRefresh, authUser);
-      setUser(authUser);
+    } catch (err) {
+      console.error('Google login failed:', err);
+      addToast('Backend is not available. Please try again later.', 'error');
     }
     setIsLoading(false);
   }, [handleLoginResult]);
@@ -173,20 +155,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/line', {});
       handleLoginResult(res);
-    } catch {
-      await new Promise(r => setTimeout(r, 600));
-      const authUser: AuthUser = {
-        id: `line-${Date.now()}`,
-        name: 'Line User',
-        email: 'line.user@example.com',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        provider: 'line',
-      };
-      const fakePayload = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider }));
-      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.fake`;
-      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.refresh-fake`;
-      storeSession(fakeAccess, fakeRefresh, authUser);
-      setUser(authUser);
+    } catch (err) {
+      console.error('LINE login failed:', err);
+      addToast('LINE login is not available. Please try again later.', 'error');
     }
     setIsLoading(false);
   }, [handleLoginResult]);
@@ -196,45 +167,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/demo', { role });
       handleLoginResult(res);
-    } catch {
-      // Fallback: offline demo
+    } catch (err) {
+      console.warn('Demo login fallback (backend unavailable):', err);
       await new Promise(r => setTimeout(r, 400));
       const roleMap: Record<string, AuthUser> = {
-        admin:   { id: 'demo-admin-001',    name: 'Sarah Connor (Administrator)',  email: 'sarah.connor@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 1, isAdmin: true },
-        manager: { id: 'demo-mgr-001',     name: 'Alex Rivera (Manager)',         email: 'alex.rivera@relateflows.com',   avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 2, isAdmin: false },
-        sales:   { id: 'demo-sales-001',   name: 'Marcus Brody (Sales Rep)',      email: 'marcus.brody@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 3, isAdmin: false },
-        support: { id: 'demo-support-001', name: 'Priya Sharma (Support)',        email: 'priya.sharma@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 4, isAdmin: false },
-        cs_admin:{ id: 'demo-csadmin-001', name: 'Kenji Tanaka (CS Admin)',       email: 'kenji.tanaka@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 5, isAdmin: false },
+        super:   { id: 'demo-super-001',   name: 'Daisuke Yamamoto (Super Admin)', email: 'daisuke@relateflows.com',       avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 1, isAdmin: true },
+        admin:   { id: 'demo-admin-001',    name: 'Sarah Connor (Administrator)',  email: 'sarah.connor@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 2, isAdmin: false },
+        manager: { id: 'demo-mgr-001',     name: 'Alex Rivera (Manager)',         email: 'alex.rivera@relateflows.com',   avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 3, isAdmin: false },
+        cs_admin:{ id: 'demo-csadmin-001', name: 'Kenji Tanaka (CS Admin)',       email: 'kenji.tanaka@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 4, isAdmin: false },
+        sales:   { id: 'demo-sales-001',   name: 'Marcus Brody (Sales Rep)',      email: 'marcus.brody@relateflows.com',  avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80', provider: 'google', roleId: 5, isAdmin: false },
       };
       const authUser = roleMap[role] || roleMap.admin;
-      const fakePayload = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider, role_id: authUser.roleId }));
-      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.fake`;
-      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.refresh-fake`;
-      storeSession(fakeAccess, fakeRefresh, authUser);
-      setUser(authUser);
+      const fakePayloadEnriched = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider, role_id: authUser.roleId }));
+      const enrichedUser: AuthUser = {
+        ...authUser,
+        roleId: authUser.roleId,
+        isAdmin: authUser.roleId === 1,
+      };
+      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayloadEnriched}.fake`;
+      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayloadEnriched}.refresh-fake`;
+      storeSession(fakeAccess, fakeRefresh, enrichedUser);
+      setUser(enrichedUser);
     }
     setIsLoading(false);
-  }, []);
+  }, [handleLoginResult]);
 
   const loginWithFacebook = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/facebook', {});
       handleLoginResult(res);
-    } catch {
-      await new Promise(r => setTimeout(r, 600));
-      const authUser: AuthUser = {
-        id: `fb-${Date.now()}`,
-        name: 'Facebook User',
-        email: 'facebook.user@example.com',
-        avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80',
-        provider: 'facebook',
-      };
-      const fakePayload = btoa(JSON.stringify({ sub: authUser.id, name: authUser.name, email: authUser.email, picture: authUser.avatar, provider: authUser.provider }));
-      const fakeAccess = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.fake`;
-      const fakeRefresh = `eyJhbGciOiJIUzI1NiJ9.${fakePayload}.refresh-fake`;
-      storeSession(fakeAccess, fakeRefresh, authUser);
-      setUser(authUser);
+    } catch (err) {
+      console.error('Facebook login failed:', err);
+      addToast('Facebook login is not available. Please try again later.', 'error');
     }
     setIsLoading(false);
   }, [handleLoginResult]);
@@ -242,15 +207,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(() => {
     const rt = api.getRefreshToken();
     if (rt) {
-      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/logout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: rt }),
-      }).catch(() => {});
+      api.post('/api/auth/logout', { refreshToken: rt }).catch(() => {});
     }
     clearSession();
     setUser(null);
   }, []);
+
+  const loadUserTenants = useCallback(async () => {
+    try {
+      const tenants = await api.get<TenantInfo[]>('/api/auth/user-tenants');
+      setUserTenants(tenants);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
+  const switchTenant = useCallback(async (tenantId: string) => {
+    setIsLoading(true);
+    try {
+      const res = await api.post<{ accessToken: string; refreshToken: string; tenantId: string; tenantName: string }>('/api/auth/switch-tenant', { tenantId });
+      localStorage.setItem('rf-access-token', res.accessToken);
+      localStorage.setItem('rf-refresh-token', res.refreshToken);
+      // Reload user info with new tenant context
+      const userData = await api.get<AuthUser>('/api/auth/me');
+      const enriched = { ...userData, tenantId: res.tenantId };
+      setUser(enriched);
+      localStorage.setItem('rf-user', JSON.stringify(enriched));
+      setUserTenants(prev => prev.map(t => ({ ...t, isDefault: t.tenantId === res.tenantId })));
+      // Reload the page to refresh all data with new tenant context
+      window.location.reload();
+    } catch (err) {
+      console.error('Tenant switch failed:', err);
+      addToast('Failed to switch company', 'error');
+    }
+    setIsLoading(false);
+  }, []);
+
+  const currentTenantName = userTenants.find(t => t.tenantId === user?.tenantId)?.name || '';
 
   if (!initialized) {
     return (
@@ -269,6 +262,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated: !!user,
         isLoading,
+        userTenants,
+        currentTenantName,
+        switchTenant,
         loginWithGoogle,
         loginWithLine,
         loginWithFacebook,

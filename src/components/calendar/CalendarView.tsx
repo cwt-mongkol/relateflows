@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { api } from '../../lib/api';
 import type { Appointment, AppointmentFormData, AppointmentType, AppointmentStatus } from '../../types/crm';
 import {
@@ -29,6 +30,19 @@ function getStatusConfig(t: (key: string) => string): Record<AppointmentStatus, 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+function getWeekOfYear(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7));
+  const week1 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getUTCDay() + 6) % 7)) / 7);
+}
+
+function getWeekOfMonth(date: Date): number {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const diff = date.getDate() + start.getDay() - 1;
+  return Math.ceil(diff / 7);
+}
 
 function toLocalDateStr(date: Date): string {
   const y = date.getFullYear();
@@ -121,6 +135,7 @@ export function serializeGuests(guests: GuestInfo[]): string[] {
 
 export const CalendarView: React.FC = () => {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const { appointments, addAppointment, updateAppointment, deleteAppointment, leads } = useCRM();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -293,6 +308,9 @@ export const CalendarView: React.FC = () => {
           >
             <ChevronRight className="w-5 h-5" />
           </button>
+          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1.5 rounded-lg whitespace-nowrap ml-2">
+            W{getWeekOfYear(currentDate)} · {t('calendar.week')} {getWeekOfMonth(currentDate)}
+          </span>
         </div>
         <button
           onClick={goToday}
@@ -304,8 +322,8 @@ export const CalendarView: React.FC = () => {
 
       {/* Calendar Grid */}
       {viewMode === 'month' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-slate-200">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+          <div className="grid grid-cols-7 border-b border-slate-200 min-w-[630px]">
             {DAYS.map((d) => (
               <div key={d} className="py-3 text-center text-xs font-bold text-slate-500 bg-slate-50/50 border-r border-slate-200 last:border-r-0">
                 {d}
@@ -387,8 +405,8 @@ export const CalendarView: React.FC = () => {
       )}
 
       {viewMode === 'week' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-slate-200">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+          <div className="grid grid-cols-7 border-b border-slate-200 min-w-[630px]">
             {weekDays.map((d, i) => {
               const isToday = isSameDay(d, today);
               return (
@@ -589,7 +607,7 @@ export const CalendarView: React.FC = () => {
         const handleCopy = () => {
           const text = `${selectedAppt.title}\n${dateStr}\n${formatTime(selectedAppt.startTime)} - ${formatTime(selectedAppt.endTime)}\nLocation: ${selectedAppt.location}\n${selectedAppt.description}`;
           navigator.clipboard.writeText(text);
-          alert('Event details copied to clipboard!');
+          addToast('Event details copied to clipboard!', 'success');
         };
 
         const handleGuestStatusChange = async (name: string, newStatus: 0 | 1 | 2) => {
@@ -880,6 +898,7 @@ const AppointmentFormModal: React.FC<FormModalProps> = ({ editingAppt, selectedD
   // Use state objects for guests
   const [guests, setGuests] = useState<GuestInfo[]>(() => parseGuests(editingAppt?.guests));
   const [searchQuery, setSearchQuery] = useState('');
+  const [showMemberSearch, setShowMemberSearch] = useState(false);
 
   const toggleEmployee = (name: string, email: string) => {
     setGuests((prev) => {
@@ -921,17 +940,17 @@ const AppointmentFormModal: React.FC<FormModalProps> = ({ editingAppt, selectedD
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700/60 shadow-2xl w-full max-w-3xl flex flex-col max-h-[95vh] md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}
-        <div className="p-6 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-700 dark:to-indigo-800 text-white flex items-center justify-between shrink-0 rounded-t-3xl border-b border-blue-500/20 shadow-xs">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-700/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-md text-white flex items-center justify-center shadow-md">
-              <Calendar className="w-5 h-5 text-yellow-300" />
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 flex items-center justify-center">
+              <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-lg tracking-tight">{editingAppt ? t('calendar.editEvent') : t('calendar.newEvent')}</h3>
-              <p className="text-xs text-blue-100/90">{editingAppt ? t('calendar.editEventDesc') : t('calendar.newEventDesc')}</p>
+              <h3 className="font-extrabold text-lg text-slate-900 dark:text-white tracking-tight">{editingAppt ? t('calendar.editEvent') : t('calendar.newEvent')}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{editingAppt ? t('calendar.editEventDesc') : t('calendar.newEventDesc')}</p>
             </div>
           </div>
-          <button onClick={onClose} type="button" className="p-1.5 rounded-xl text-white/80 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer">
+          <button onClick={onClose} type="button" className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -1064,111 +1083,125 @@ const AppointmentFormModal: React.FC<FormModalProps> = ({ editingAppt, selectedD
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                   {t('calendar.assignMembers')}
                 </label>
-                
-                {/* Search employees by name or email */}
-                <div className="relative mb-2.5">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t('calendar.searchMembers')}
-                    className="w-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 rounded-xl px-4 py-2 pl-9 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-xs"
-                  />
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                </div>
 
-                <div className="bg-slate-50/50 dark:bg-slate-800/20 border border-slate-200/80 dark:border-slate-700/50 rounded-2xl p-2 space-y-1 max-h-[190px] overflow-y-auto">
-                  {TEAM_MEMBERS.filter((emp) => 
-                    emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                    emp.email.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((emp) => {
-                    const guest = guests.find((g) => g.name.toLowerCase() === emp.name.toLowerCase());
-                    const selected = !!guest;
-                    return (
-                      <div
-                        key={emp.id}
-                        className={`flex items-center justify-between px-3 py-1.5 rounded-xl transition-all duration-150 border ${
-                          selected
-                            ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800/50'
-                            : 'hover:bg-slate-100/70 dark:hover:bg-slate-800/40 border-transparent'
-                        }`}
-                      >
-                        <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0 py-0.5">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleEmployee(emp.name, emp.email)}
-                            className="checkbox checkbox-xs checkbox-primary rounded-md shrink-0 focus:ring-0"
+                {/* Avatar group + counter + add button */}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex -space-x-1.5 overflow-hidden">
+                    {guests.slice(0, 4).map((g) => {
+                      const emp = TEAM_MEMBERS.find((e) => e.name === g.name);
+                      if (!emp) return null;
+                      return (
+                        <div key={g.name} className="relative">
+                          <img
+                            src={emp.avatar}
+                            alt={g.name}
+                            title={`${g.name} (${t('guest.' + (g.status === 0 ? 'yes' : g.status === 1 ? 'no' : 'awaiting'))})`}
+                            className="inline-block h-7 w-7 rounded-full ring-2 ring-white dark:ring-slate-900 object-cover"
                           />
-                          <div className="w-7 h-7 rounded-full border border-slate-200/80 dark:border-slate-700/60 overflow-hidden shrink-0">
-                            <img src={emp.avatar} alt={emp.name} className="w-full h-full object-cover" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{emp.name}</p>
-                            <p className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">{emp.email}</p>
-                          </div>
-                        </label>
-                        
-                        {/* RSVP Status dropdown for selected guests */}
-                        {selected && (
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
-                            <select
-                              value={guest.status}
-                              onChange={(e) => {
-                                const newStatus = Number(e.target.value) as 0 | 1 | 2;
-                                setGuests((prev) =>
-                                  prev.map((g) =>
-                                    g.name.toLowerCase() === emp.name.toLowerCase() ? { ...g, status: newStatus } : g
-                                  )
-                                );
-                              }}
-                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold rounded-lg px-2 py-0.5 text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
-                            >
-                              <option value={2}>{t('guest.awaiting')}</option>
-                              <option value={0}>{t('guest.yes')}</option>
-                              <option value={1}>{t('guest.no')}</option>
-                            </select>
-                            <UserPlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                          </div>
-                        )}
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-1 ring-white dark:ring-slate-900 ${
+                            g.status === 0 ? 'bg-green-500' :
+                            g.status === 1 ? 'bg-red-500' :
+                            'bg-slate-400'
+                          }`} />
+                        </div>
+                      );
+                    })}
+                    {guests.length > 4 && (
+                      <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 border-2 border-white dark:border-slate-900 flex items-center justify-center text-[9px] font-bold text-slate-500 dark:text-slate-400" title={`${guests.length - 4} more`}>
+                        +{guests.length - 4}
                       </div>
-                    );
-                  })}
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowMemberSearch((prev) => !prev)}
+                      className="w-7 h-7 rounded-full border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 dark:hover:text-slate-300 transition-all cursor-pointer"
+                      title={t('calendar.searchMembers')}
+                    >
+                      <UserPlus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {guests.length > 0 && (
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                      {guests.length} {t('calendar.membersAssigned').replace('{count}', String(guests.length)).replace(/^\d+\s*/, '')}
+                    </span>
+                  )}
                 </div>
 
-                {guests.length > 0 && (
-                  <div className="flex items-center gap-2 mt-2 px-1">
-                    <div className="flex -space-x-1.5 overflow-hidden">
-                      {guests.map((g) => {
-                        const emp = TEAM_MEMBERS.find((e) => e.name === g.name);
-                        if (!emp) return null;
+                {/* Collapsible member search and list */}
+                {showMemberSearch && (
+                  <>
+                    <div className="relative mb-2.5">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder={t('calendar.searchMembers')}
+                        className="w-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 rounded-xl px-4 py-2 pl-9 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-xs"
+                      />
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    </div>
+
+                    <div className="bg-slate-50/50 dark:bg-slate-800/20 border border-slate-200/80 dark:border-slate-700/50 rounded-2xl p-2 space-y-1 max-h-[190px] overflow-y-auto">
+                      {TEAM_MEMBERS.filter((emp) => 
+                        emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                        emp.email.toLowerCase().includes(searchQuery.toLowerCase())
+                      ).map((emp) => {
+                        const guest = guests.find((g) => g.name.toLowerCase() === emp.name.toLowerCase());
+                        const selected = !!guest;
                         return (
-                          <div key={g.name} className="relative">
-                            <img
-                              src={emp.avatar}
-                              alt={g.name}
-                              title={`${g.name} (${t('guest.' + (g.status === 0 ? 'yes' : g.status === 1 ? 'no' : 'awaiting'))})`}
-                              className="inline-block h-6 w-6 rounded-full ring-2 ring-white dark:ring-slate-900 object-cover"
-                            />
-                            {/* Little indicator badge for RSVP */}
-                            <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-900 ${
-                              g.status === 0 ? 'bg-green-500' :
-                              g.status === 1 ? 'bg-red-500' :
-                              'bg-slate-400'
-                            }`} />
+                          <div
+                            key={emp.id}
+                            className={`flex items-center justify-between px-3 py-1.5 rounded-xl transition-all duration-150 border ${
+                              selected
+                                ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800/50'
+                                : 'hover:bg-slate-100/70 dark:hover:bg-slate-800/40 border-transparent'
+                            }`}
+                          >
+                            <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0 py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => { toggleEmployee(emp.name, emp.email); setSearchQuery(''); }}
+                                className="checkbox checkbox-xs checkbox-primary rounded-md shrink-0 focus:ring-0"
+                              />
+                              <div className="w-7 h-7 rounded-full border border-slate-200/80 dark:border-slate-700/60 overflow-hidden shrink-0">
+                                <img src={emp.avatar} alt={emp.name} className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{emp.name}</p>
+                                <p className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">{emp.email}</p>
+                              </div>
+                            </label>
+
+                            {selected && (
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <select
+                                  value={guest.status}
+                                  onChange={(e) => {
+                                    const newStatus = Number(e.target.value) as 0 | 1 | 2;
+                                    setGuests((prev) =>
+                                      prev.map((g) =>
+                                        g.name.toLowerCase() === emp.name.toLowerCase() ? { ...g, status: newStatus } : g
+                                      )
+                                    );
+                                  }}
+                                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold rounded-lg px-2 py-0.5 text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                                >
+                                  <option value={2}>{t('guest.awaiting')}</option>
+                                  <option value={0}>{t('guest.yes')}</option>
+                                  <option value={1}>{t('guest.no')}</option>
+                                </select>
+                                <UserPlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                      {guests.length === 1
-                        ? t('calendar.membersAssigned').replace('{count}', '1')
-                        : t('calendar.membersAssigned').replace('{count}', String(guests.length))}
-                    </span>
-                  </div>
+                  </>
                 )}
               </div>
             </div>

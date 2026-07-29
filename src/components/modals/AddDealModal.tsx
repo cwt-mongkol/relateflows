@@ -55,21 +55,21 @@ export const AddDealModal: React.FC = () => {
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700/60 shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden" style={{ contentVisibility: 'auto' }}>
         
         {/* Modal Header */}
-        <div className="p-6 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-700 dark:to-indigo-800 text-white flex items-center justify-between shrink-0 rounded-t-3xl border-b border-blue-500/20 shadow-xs">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-700/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-md text-white flex items-center justify-center shadow-md animate-pulse">
-              <TrendingUp className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 flex items-center justify-center">
+              <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold tracking-tight">Create New Sales Deal</h3>
-              <p className="text-xs text-blue-100/90">Add opportunity to RelateFlows pipeline</p>
+              <h3 className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">Create New Sales Deal</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Add opportunity to pipeline</p>
             </div>
           </div>
 
           <button
             onClick={() => setIsAddDealModalOpen(false)}
             type="button"
-            className="p-1.5 rounded-xl text-white/80 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -188,7 +188,7 @@ export const AddDealModal: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white hover-lift shadow-md transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white shadow-sm transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (
                 <span className="loading loading-spinner loading-xs" />

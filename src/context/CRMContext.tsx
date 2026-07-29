@@ -170,7 +170,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async function loadData() {
       setIsLoading(true);
       try {
-        console.log('Fetching CRM data from database API...');
+
         const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData] = await Promise.all([
           api.get<Deal[]>('/api/deals').catch(() => null),
           api.get<Contact[]>('/api/contacts').catch(() => null),
@@ -194,45 +194,25 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null
         ];
 
-        if (dealsData && dealsData.length > 0) setDeals(dealsData);
-        if (contactsData && contactsData.length > 0) setContacts(contactsData);
-        if (companiesData && companiesData.length > 0) setCompanies(companiesData);
-        if (activitiesData && activitiesData.length > 0) setActivities(activitiesData);
-        if (workflowsData && workflowsData.length > 0) setWorkflows(workflowsData);
-        if (metricsData && metricsData.length > 0) setMetrics(metricsData);
+        // Use API data if available and non-empty, otherwise fall back to mock data
+        setDeals(dealsData && dealsData.length > 0 ? dealsData : INITIAL_DEALS);
+        setContacts(contactsData && contactsData.length > 0 ? contactsData : INITIAL_CONTACTS);
+        setCompanies(companiesData && companiesData.length > 0 ? companiesData : INITIAL_COMPANIES);
+        setActivities(activitiesData && activitiesData.length > 0 ? activitiesData : INITIAL_ACTIVITIES);
+        setWorkflows(workflowsData && workflowsData.length > 0 ? workflowsData : INITIAL_WORKFLOWS);
+        setMetrics(metricsData && metricsData.length > 0 ? metricsData : INITIAL_METRICS);
         if (stagesData && stagesData.length > 0) setStages(stagesData);
-        if (leadsData && leadsData.length > 0) setLeads(leadsData);
-        if (chatData && chatData.length > 0) setChatMessages(chatData);
-        if (productsData && productsData.length > 0) setProducts(productsData);
-        if (categoriesData && categoriesData.length > 0) setCategories(categoriesData);
-        if (appointmentsData && appointmentsData.length > 0) setAppointments(appointmentsData);
-        if (tasksData && tasksData.length > 0) setTasks(tasksData);
-        if (tagsData && tagsData.length > 0) setTags(tagsData);
-        if (allocData && allocData.length > 0) setAllocations(allocData);
-        console.log('CRM data successfully loaded from database.');
-      } catch (err) {
-        console.warn('Backend API not available, loading mock data:', err);
-        setDeals(INITIAL_DEALS);
-        setContacts(INITIAL_CONTACTS);
-        setCompanies(INITIAL_COMPANIES);
-        setActivities(INITIAL_ACTIVITIES);
-        setWorkflows(INITIAL_WORKFLOWS);
-        setMetrics(INITIAL_METRICS);
-        setStages(INITIAL_STAGES);
-        setLeads(enrichLeads(INITIAL_LEADS));
-        setChatMessages(INITIAL_CHAT_MESSAGES);
-        setProducts(INITIAL_PRODUCTS);
-        setCategories(INITIAL_CATEGORIES);
-        setAppointments(INITIAL_APPOINTMENTS);
-        setTasks(INITIAL_TASKS);
-        setTags(INITIAL_TAGS);
+        setLeads(leadsData && leadsData.length > 0 ? leadsData : enrichLeads(INITIAL_LEADS));
+        setChatMessages(chatData && chatData.length > 0 ? chatData : INITIAL_CHAT_MESSAGES);
+        setProducts(productsData && productsData.length > 0 ? productsData : INITIAL_PRODUCTS);
+        setCategories(categoriesData && categoriesData.length > 0 ? categoriesData : INITIAL_CATEGORIES);
+        setAppointments(appointmentsData && appointmentsData.length > 0 ? appointmentsData : INITIAL_APPOINTMENTS);
+        setTasks(tasksData && tasksData.length > 0 ? tasksData : INITIAL_TASKS);
+        setTags(tagsData && tagsData.length > 0 ? tagsData : INITIAL_TAGS);
         setLeadTags(LEAD_TAGS);
-        setAllocations(INITIAL_ALLOCATIONS);
-        // Load per-user stages
-        try {
-          const saved = localStorage.getItem(`rf-stages-${userId}`);
-          if (saved) setStages(JSON.parse(saved));
-        } catch {}
+        setAllocations(allocData && allocData.length > 0 ? allocData : INITIAL_ALLOCATIONS);
+      } catch (err) {
+        console.warn('Failed to load data, using mock data:', err);
       }
       setIsLoading(false);
     }

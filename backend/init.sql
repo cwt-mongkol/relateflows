@@ -307,6 +307,21 @@ CREATE INDEX IF NOT EXISTS idx_user_channel_access_channel ON user_channel_acces
 CREATE INDEX IF NOT EXISTS idx_social_channels_type ON social_channels(type);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role_id);
 
+-- Google Calendar tokens table
+CREATE TABLE IF NOT EXISTS google_calendar_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    scope TEXT,
+    token_type VARCHAR(50) DEFAULT 'Bearer',
+    expiry_date BIGINT,
+    calendar_id VARCHAR(255) DEFAULT 'primary',
+    connected BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- ===== Multi-Tenancy Schema =====
 
 -- Tenant companies (the organizations that own an instance of RelateFlows)
@@ -323,6 +338,34 @@ CREATE TABLE IF NOT EXISTS tenant_companies (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Enterprise accounts (parent account owning multiple tenant companies)
+CREATE TABLE IF NOT EXISTS enterprise_accounts (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) DEFAULT '',
+    phone VARCHAR(50) DEFAULT '',
+    billing_plan VARCHAR(50) DEFAULT 'free',
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'cancelled')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+ALTER TABLE tenant_companies ADD COLUMN IF NOT EXISTS enterprise_account_id VARCHAR(50) REFERENCES enterprise_accounts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_tenant_companies_enterprise ON tenant_companies(enterprise_account_id);
+
+-- User-tenant access mapping (many-to-many, replaces users.tenant_id as single source)
+CREATE TABLE IF NOT EXISTS user_tenants (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    is_default BOOLEAN DEFAULT FALSE,
+    role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id, tenant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_tenants_user ON user_tenants(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_tenants_tenant ON user_tenants(tenant_id);
+
 -- Add tenant_id to all tenant-scoped tables
 ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
@@ -337,7 +380,8 @@ ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES 
 ALTER TABLE tb_appointments ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
 ALTER TABLE tb_products ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
 ALTER TABLE tb_categories ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
-ALTER TABLE google_calendar_tokens ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS google_calendar_tokens ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE;
 
 -- Indexes for tenant isolation performance
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
@@ -349,6 +393,7 @@ CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_tenant ON metrics(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_social_channels_tenant ON social_channels(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_companies_tenant ON companies(tenant_id);
 
 -- Enable Row-Level Security on tenant tables
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
@@ -363,6 +408,12 @@ ALTER TABLE tb_appointments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tb_products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tb_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE google_calendar_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_objects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_settings ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies: each row's tenant_id must match the session variable
 DROP POLICY IF EXISTS tenant_isolation ON contacts;
@@ -389,6 +440,18 @@ DROP POLICY IF EXISTS tenant_isolation ON tb_categories;
 CREATE POLICY tenant_isolation ON tb_categories FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
 DROP POLICY IF EXISTS tenant_isolation ON google_calendar_tokens;
 CREATE POLICY tenant_isolation ON google_calendar_tokens FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON companies;
+CREATE POLICY tenant_isolation ON companies FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON metrics;
+CREATE POLICY tenant_isolation ON metrics FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON custom_objects;
+CREATE POLICY tenant_isolation ON custom_objects FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON custom_fields;
+CREATE POLICY tenant_isolation ON custom_fields FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON custom_records;
+CREATE POLICY tenant_isolation ON custom_records FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON tenant_settings;
+CREATE POLICY tenant_isolation ON tenant_settings FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
 
 -- Seed: System Permissions (from permission matrix)
 INSERT INTO permissions (module, action, label) VALUES
@@ -422,23 +485,33 @@ INSERT INTO permissions (module, action, label) VALUES
 ON CONFLICT (module, action) DO NOTHING;
 
 -- Seed: System Roles
+--   role 1 = Super Admin (platform-wide, sees across all tenants)
+--   role 2 = Administrator (full system within tenant)
+--   role 3 = Manager (manage pipeline, team, tasks)
+--   role 4 = CS Admin (social inbox, contacts, users, audit — plus support agent capabilities)
+--   role 5 = Sales Rep (own pipeline, own contacts, own tasks)
 INSERT INTO roles (id, name, description, is_system) VALUES
-    (1, 'Administrator', 'Full system access — all modules, all settings, full scope', TRUE),
-    (2, 'Manager', 'Manage pipeline, team contacts, tasks, view team analytics, manage team channel access', TRUE),
-    (3, 'Sales Rep', 'View and edit own pipeline, own contacts, own tasks, reply in own channels', TRUE),
-    (4, 'Support Agent', 'View inbox, reply in assigned channels, view contacts (read-only), manage own tasks & calendar', TRUE),
-    (5, 'Customer Service Admin', 'Manage social inbox, contacts, tasks, calendar, users, channels, audit log — but NOT pipeline, workflows, analytics deep access, roles/permissions, or integrations', TRUE)
+    (1, 'Super Admin', 'Platform-wide access — manages all tenant companies, sees all data across all organizations', TRUE),
+    (2, 'Administrator', 'Full system access — all modules, all settings, full scope within company', TRUE),
+    (3, 'Manager', 'Manage pipeline, team contacts, tasks, view team analytics, manage team channel access', TRUE),
+    (4, 'CS Admin', 'Manage social inbox, contacts, tasks, calendar, users, channels, audit log — plus support agent capabilities', TRUE),
+    (5, 'Sales Rep', 'View and edit own pipeline, own contacts, own tasks, reply in own channels', TRUE)
 ON CONFLICT (id) DO NOTHING;
 
--- Seed: Admin gets all permissions
+-- Super Admin gets ALL permissions
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT 1, id FROM permissions
 ON CONFLICT DO NOTHING;
 
--- Seed: Manager (role_id=2) — all except stage_crud_settings, contacts_delete,
+-- Seed: Administrator (role_id=2) gets all permissions
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT 2, id FROM permissions
+ON CONFLICT DO NOTHING;
+
+-- Seed: Manager (role_id=3) — all except stage_crud_settings, contacts_delete,
 --   google_sync_setup, roles_permissions, channel_management, integrations_api_keys
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT 2, id FROM permissions WHERE NOT (
+SELECT 3, id FROM permissions WHERE NOT (
     module = 'pipeline' AND action = 'stage_crud_settings'
 ) AND NOT (
     module = 'contacts' AND action = 'delete'
@@ -453,47 +526,12 @@ SELECT 2, id FROM permissions WHERE NOT (
 )
 ON CONFLICT DO NOTHING;
 
--- Seed: Sales Rep (role_id=3) — dashboard, social_inbox (view+reply, NOT lead_allocation),
---   pipeline (view_deals, create_edit_deal — NOT delete_deal, NOT stage_crud_settings),
---   contacts (view_search, create_edit — NOT delete),
---   tasks (view, edit_delete — NOT create_assign_others),
---   calendar (view_create_appointment — NOT edit_delete_others, NOT google_sync_setup),
---   workflows (none), analytics (none), settings_appearance, settings_user_management (none),
---   audit_log (none)
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 3, id FROM permissions WHERE (
-    (module = 'dashboard' AND action = 'view')
-    OR (module = 'social_inbox' AND action IN ('view_channel', 'reply'))
-    OR (module = 'pipeline' AND action IN ('view_deals', 'create_edit_deal'))
-    OR (module = 'contacts' AND action IN ('view_search', 'create_edit'))
-    OR (module = 'tasks' AND action IN ('view', 'edit_delete'))
-    OR (module = 'calendar' AND action = 'view_create_appointment')
-    OR (module = 'settings_appearance' AND action = 'change_language_theme_own')
-)
-ON CONFLICT DO NOTHING;
-
--- Seed: Support Agent (role_id=4) — dashboard (view), social_inbox (view_channel, reply),
---   pipeline (none), contacts (view_search only), tasks (view, edit_delete),
---   calendar (view_create_appointment), settings_appearance
+-- Seed: CS Admin (role_id=4) — social_inbox (all), pipeline (view_deals read-only),
+--   contacts (search, create_edit), tasks (team), calendar (view_create + edit_delete_others),
+--   workflows (view, create_toggle_edit), analytics (view), settings_user_management,
+--   settings_channel_access_matrix, audit_log — plus support capabilities (view_channel, reply)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT 4, id FROM permissions WHERE (
-    (module = 'dashboard' AND action = 'view')
-    OR (module = 'social_inbox' AND action IN ('view_channel', 'reply'))
-    OR (module = 'contacts' AND action = 'view_search')
-    OR (module = 'tasks' AND action IN ('view', 'edit_delete'))
-    OR (module = 'calendar' AND action = 'view_create_appointment')
-    OR (module = 'settings_appearance' AND action = 'change_language_theme_own')
-)
-ON CONFLICT DO NOTHING;
-
--- Seed: Customer Service Admin (role_id=5) — dashboard (cs_team), social_inbox (all),
---   pipeline (view_deals read-only), contacts (view+create_edit, NOT delete),
---   tasks (cs_team), calendar (view_create + edit_delete_others, NOT google_sync),
---   workflows (cs_related_only), analytics (cs_team), settings_appearance,
---   settings_user_management (cs_team_only), settings_channel_access_matrix (cs_team),
---   audit_log (chat_customer_related_only)
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 5, id FROM permissions WHERE (
     (module = 'dashboard' AND action = 'view')
     OR (module = 'social_inbox' AND action IN ('view_channel', 'reply', 'lead_allocation'))
     OR (module = 'pipeline' AND action = 'view_deals')
@@ -506,6 +544,24 @@ SELECT 5, id FROM permissions WHERE (
     OR (module = 'settings_user_management' AND action = 'view_add_edit_deactivate_user')
     OR (module = 'settings_channel_access_matrix' AND action = 'map_user_channel')
     OR (module = 'audit_log' AND action = 'view')
+)
+ON CONFLICT DO NOTHING;
+
+-- Seed: Sales Rep (role_id=5) — dashboard, social_inbox (view+reply, NOT lead_allocation),
+--   pipeline (view_deals, create_edit_deal — NOT delete_deal, NOT stage_crud_settings),
+--   contacts (view_search, create_edit — NOT delete),
+--   tasks (view, edit_delete — NOT create_assign_others),
+--   calendar (view_create_appointment — NOT edit_delete_others),
+--   settings_appearance
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT 5, id FROM permissions WHERE (
+    (module = 'dashboard' AND action = 'view')
+    OR (module = 'social_inbox' AND action IN ('view_channel', 'reply'))
+    OR (module = 'pipeline' AND action IN ('view_deals', 'create_edit_deal'))
+    OR (module = 'contacts' AND action IN ('view_search', 'create_edit'))
+    OR (module = 'tasks' AND action IN ('view', 'edit_delete'))
+    OR (module = 'calendar' AND action = 'view_create_appointment')
+    OR (module = 'settings_appearance' AND action = 'change_language_theme_own')
 )
 ON CONFLICT DO NOTHING;
 
@@ -529,6 +585,7 @@ UPDATE tb_appointments SET tenant_id = 'tenant-default-001' WHERE tenant_id IS N
 UPDATE tb_products SET tenant_id = 'tenant-default-001' WHERE tenant_id IS NULL;
 UPDATE tb_categories SET tenant_id = 'tenant-default-001' WHERE tenant_id IS NULL;
 UPDATE google_calendar_tokens SET tenant_id = 'tenant-default-001' WHERE tenant_id IS NULL;
+UPDATE companies SET tenant_id = 'tenant-default-001' WHERE tenant_id IS NULL;
 
 -- ===== Customer Tags (for CS to tag leads before allocation) =====
 CREATE TABLE IF NOT EXISTS customer_tags (
@@ -612,49 +669,103 @@ INSERT INTO permissions (module, action, label) VALUES
     ('settings_company', 'edit', 'Edit Company Profile')
 ON CONFLICT (module, action) DO NOTHING;
 
--- Grant settings_company to roles that should manage company profile
+-- Grant settings_company to roles
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT 1, id FROM permissions WHERE module = 'settings_company' AND action IN ('view', 'edit')
 ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT 2, id FROM permissions WHERE module = 'settings_company' AND action = 'view'
+SELECT 2, id FROM permissions WHERE module = 'settings_company' AND action IN ('view', 'edit')
 ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT 5, id FROM permissions WHERE module = 'settings_company' AND action = 'view'
+SELECT 4, id FROM permissions WHERE module = 'settings_company' AND action = 'view'
 ON CONFLICT DO NOTHING;
 
--- Add Super Admin role (platform-wide, sees across all tenants)
-INSERT INTO roles (id, name, description, is_system) VALUES
-    (6, 'Super Admin', 'Platform-wide access — manages all tenant companies, sees all data across all organizations', TRUE)
-ON CONFLICT (id) DO NOTHING;
-
--- Super Admin gets ALL permissions (same as Admin role 1)
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 6, id FROM permissions
-ON CONFLICT DO NOTHING;
-
--- Seed: Demo users for each role (now with tenant_id)
+-- Seed: Demo users
 INSERT INTO users (id, name, email, avatar, provider, role_id, tenant_id, status) VALUES
-    ('demo-admin-001', 'Sarah Connor (Administrator)', 'sarah.connor@relateflows.com', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80', 'google', 1, 'tenant-default-001', 'active'),
-    ('demo-mgr-001', 'Alex Rivera (Manager)', 'alex.rivera@relateflows.com', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80', 'google', 2, 'tenant-default-001', 'active'),
-    ('demo-sales-001', 'Marcus Brody (Sales Rep)', 'marcus.brody@relateflows.com', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80', 'google', 3, 'tenant-default-001', 'active'),
-    ('demo-support-001', 'Priya Sharma (Support Agent)', 'priya.sharma@relateflows.com', 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&auto=format&fit=crop&q=80', 'google', 4, 'tenant-default-001', 'active'),
-    ('demo-csadmin-001', 'Kenji Tanaka (CS Admin)', 'kenji.tanaka@relateflows.com', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', 'google', 5, 'tenant-default-001', 'active'),
-    ('demo-super-001', 'Daisuke Yamamoto (Super Admin)', 'daisuke@relateflows.com', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80', 'google', 6, NULL, 'active')
+    ('demo-super-001', 'Daisuke Yamamoto (Super Admin)', 'daisuke@relateflows.com', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80', 'google', 1, NULL, 'active'),
+    ('demo-admin-001', 'Sarah Connor (Administrator)', 'sarah.connor@relateflows.com', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80', 'google', 2, 'tenant-default-001', 'active'),
+    ('demo-mgr-001', 'Alex Rivera (Manager)', 'alex.rivera@relateflows.com', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80', 'google', 3, 'tenant-default-001', 'active'),
+    ('demo-csadmin-001', 'Kenji Tanaka (CS Admin)', 'kenji.tanaka@relateflows.com', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80', 'google', 4, 'tenant-default-001', 'active'),
+    ('demo-sales-001', 'Marcus Brody (Sales Rep)', 'marcus.brody@relateflows.com', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80', 'google', 5, 'tenant-default-001', 'active')
 ON CONFLICT (id) DO NOTHING;
 
--- Google Calendar tokens table
-CREATE TABLE IF NOT EXISTS google_calendar_tokens (
-    id SERIAL PRIMARY KEY,
-    user_id VARCHAR(50) NOT NULL UNIQUE,
-    access_token TEXT NOT NULL,
-    refresh_token TEXT,
-    scope TEXT,
-    token_type VARCHAR(50) DEFAULT 'Bearer',
-    expiry_date BIGINT,
-    calendar_id VARCHAR(255) DEFAULT 'primary',
-    connected BOOLEAN DEFAULT FALSE,
+-- Seed: Default enterprise account
+INSERT INTO enterprise_accounts (id, name, email, billing_plan, status) VALUES
+    ('enterprise-default-001', 'RelateFlows Demo HQ', 'admin@relateflows.com', 'enterprise', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+-- Link default tenant to enterprise
+UPDATE tenant_companies SET enterprise_account_id = 'enterprise-default-001' WHERE id = 'tenant-default-001' AND enterprise_account_id IS NULL;
+
+-- Seed: user_tenants from existing users (each user gets their default tenant)
+INSERT INTO user_tenants (user_id, tenant_id, is_default, role_id)
+SELECT id, COALESCE(tenant_id, 'tenant-default-001'), TRUE, role_id FROM users
+WHERE (tenant_id IS NOT NULL OR role_id != 1)
+ON CONFLICT DO NOTHING;
+
+-- Super admin also gets access to default tenant (can switch)
+INSERT INTO user_tenants (user_id, tenant_id, is_default, role_id)
+SELECT id, 'tenant-default-001', FALSE, role_id FROM users
+WHERE tenant_id IS NULL AND role_id = 1
+ON CONFLICT DO NOTHING;
+
+-- ===== Dynamic Objects / Custom Fields Schema =====
+
+CREATE TABLE IF NOT EXISTS custom_objects (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT '',
+    icon VARCHAR(50) DEFAULT 'table',
+    color VARCHAR(7) DEFAULT '#6366f1',
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS custom_fields (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    owner_type VARCHAR(100) NOT NULL,
+    owner_id VARCHAR(50) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    field_type VARCHAR(50) NOT NULL DEFAULT 'text',
+    options JSONB DEFAULT '[]',
+    reference_owner VARCHAR(100) DEFAULT '',
+    required BOOLEAN DEFAULT false,
+    placeholder VARCHAR(255) DEFAULT '',
+    default_value TEXT DEFAULT '',
+    ordering INT DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, owner_type, owner_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cf_owner ON custom_fields(tenant_id, owner_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS custom_records (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    object_id VARCHAR(50) REFERENCES custom_objects(id) ON DELETE CASCADE,
+    data JSONB NOT NULL DEFAULT '{}',
+    created_by VARCHAR(50) DEFAULT '',
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cr_object ON custom_records(tenant_id, object_id);
+
+-- Tenant settings (encrypted integration keys, etc.)
+CREATE TABLE IF NOT EXISTS tenant_settings (
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    key VARCHAR(255) NOT NULL,
+    value_encrypted TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, key)
 );
 

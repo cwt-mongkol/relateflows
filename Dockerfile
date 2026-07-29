@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+RUN npm ci && npm install lightningcss-linux-x64-musl --no-save
 
 COPY . .
 

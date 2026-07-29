@@ -1,5 +1,6 @@
 import React from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import Chart from 'react-apexcharts';
 import type {} from 'apexcharts';
 import { 
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 export const DashboardView: React.FC = () => {
   const { isLoading, deals, stages, workflows, activities, metrics, setCurrentView, toggleWorkflowStatus } = useCRM();
+  const { t } = useSettings();
 
   // Calculate high-level pipeline stats
   const stageCounts: Record<string, number> = {};
@@ -30,6 +32,26 @@ export const DashboardView: React.FC = () => {
       default: return <TrendingUp className="w-5 h-5 text-blue-600" />;
     }
   };
+
+  const stageNames = [
+    t('dashboard.stage.leadIn'),
+    t('dashboard.stage.contacted'),
+    t('dashboard.stage.proposal'),
+    t('dashboard.stage.negotiation'),
+    t('dashboard.stage.closedWon'),
+    t('dashboard.stage.closedLost'),
+  ];
+  const stageKeys = ['lead_in', 'contacted', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
+  const stageColors = ['#94A3B8', '#60A5FA', '#2563ED', '#F59E0B', '#10B981', '#FB7185'];
+
+  const legendItems = [
+    { key: 'lead_in', color: 'bg-slate-400', bg: 'bg-slate-50', border: 'border-slate-100', textColor: 'text-slate-500', labelKey: 'dashboard.stage.leadIn' },
+    { key: 'contacted', color: 'bg-blue-400', bg: 'bg-blue-50', border: 'border-blue-100', textColor: 'text-blue-700', labelKey: 'dashboard.stage.contacted' },
+    { key: 'proposal', color: 'bg-blue-600', bg: 'bg-blue-50/80', border: 'border-blue-200', textColor: 'text-blue-800', labelKey: 'dashboard.stage.proposal' },
+    { key: 'negotiation', color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', textColor: 'text-amber-700', labelKey: 'dashboard.stage.negotiation' },
+    { key: 'closed_won', color: 'bg-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', textColor: 'text-emerald-700', labelKey: 'dashboard.stage.closedWon' },
+    { key: 'closed_lost', color: 'bg-rose-400', bg: 'bg-rose-50', border: 'border-rose-100', textColor: 'text-rose-700', labelKey: 'dashboard.stage.closedLost' },
+  ];
 
   if (isLoading) {
     return (
@@ -94,15 +116,15 @@ export const DashboardView: React.FC = () => {
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Pipeline Funnel Distribution</h3>
-              <p className="text-xs text-slate-500">Live breakdown of deals by sales stage</p>
+              <h3 className="text-base font-bold text-slate-900">{t('dashboard.pipelineFunnel')}</h3>
+              <p className="text-xs text-slate-500">{t('dashboard.pipelineFunnel.desc')}</p>
             </div>
 
             <button
               onClick={() => setCurrentView('pipeline')}
               className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 hover:underline"
             >
-              <span>View All Kanban</span>
+              <span>{t('dashboard.viewKanban')}</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
@@ -110,9 +132,6 @@ export const DashboardView: React.FC = () => {
           {/* Visual Stage Distribution Chart */}
           <div className="space-y-4">
             {(() => {
-              const stageNames = ['Lead In', 'Contacted', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
-              const stageKeys = ['lead_in', 'contacted', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
-              const stageColors = ['#94A3B8', '#60A5FA', '#2563ED', '#F59E0B', '#10B981', '#FB7185'];
               const series = stageKeys.map(k => stageCounts[k] || 0);
               const barOptions: ApexCharts.ApexOptions = {
                 chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'inherit' },
@@ -121,8 +140,8 @@ export const DashboardView: React.FC = () => {
                 xaxis: { labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' } } },
                 yaxis: { labels: { style: { fontSize: '11px', fontWeight: 600, colors: '#64748b' } } },
                 grid: { borderColor: '#e2e8f0', strokeDashArray: 4 },
-                dataLabels: { enabled: true, style: { fontSize: '11px', fontWeight: 700, colors: ['#fff'] }, formatter: (v) => `${v} deals` },
-                tooltip: { y: { formatter: (v) => `${v} deals` } },
+                dataLabels: { enabled: true, style: { fontSize: '11px', fontWeight: 700, colors: ['#fff'] }, formatter: (v) => t('dashboard.stage.deals').replace('{v}', String(v)) },
+                tooltip: { y: { formatter: (v) => t('dashboard.stage.deals').replace('{v}', String(v)) } },
                 legend: { show: false },
               };
               return <Chart options={barOptions} series={[{ data: series.map((v, i) => ({ x: stageNames[i], y: v })) }]} type="bar" height={260} />;
@@ -130,59 +149,21 @@ export const DashboardView: React.FC = () => {
 
             {/* Stages Legend Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-slate-500">Lead In</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.lead_in} Deals</p>
+              {legendItems.map((item) => (
+                <div key={item.key} className={`p-3 rounded-xl ${item.bg} border ${item.border} flex items-center gap-3`}>
+                  <div className={`w-3 h-3 rounded-full ${item.color} shrink-0`} />
+                  <div>
+                    <p className={`text-[11px] font-bold ${item.textColor}`}>{t(item.labelKey)}</p>
+                    <p className="text-sm font-extrabold text-slate-900">{stageCounts[item.key] || 0} {t('dashboard.stage.deals').replace('{v}', String(stageCounts[item.key] || 0))}</p>
+                  </div>
                 </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-blue-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-blue-700">Contacted</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.contacted} Deals</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-blue-600 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-blue-800">Proposal</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.proposal} Deals</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-amber-500 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-amber-700">Negotiation</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.negotiation} Deals</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-emerald-700">Closed Won</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.closed_won} Deals</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-rose-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-bold text-rose-700">Closed Lost</p>
-                  <p className="text-sm font-extrabold text-slate-900">{stageCounts.closed_lost} Deals</p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
           {/* High Priority Deals List */}
           <div className="pt-2">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Top High Priority Deals</h4>
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">{t('dashboard.topDeals')}</h4>
             <div className="space-y-2.5">
               {deals.filter(d => d.priority === 'high').slice(0, 3).map((deal) => (
                 <div
@@ -205,7 +186,7 @@ export const DashboardView: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-extrabold text-slate-800">${deal.value.toLocaleString()}</span>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200">
-                      {deal.probability}% Win Prob
+                      {t('dashboard.winProb').replace('{prob}', String(deal.probability))}
                     </span>
                   </div>
                 </div>
@@ -221,14 +202,14 @@ export const DashboardView: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                <h3 className="text-sm font-bold text-slate-900">RelateFlows Triggers</h3>
+                <h3 className="text-sm font-bold text-slate-900">{t('dashboard.triggers')}</h3>
               </div>
 
               <button
                 onClick={() => setCurrentView('workflows')}
                 className="text-[11px] font-bold text-blue-600 hover:underline"
               >
-                Manage All
+                {t('dashboard.manageAll')}
               </button>
             </div>
 
@@ -249,7 +230,7 @@ export const DashboardView: React.FC = () => {
                   </div>
                   <p className="text-[11px] text-slate-500 line-clamp-1">{wf.trigger}</p>
                   <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1 border-t border-slate-200/60">
-                    <span>{wf.executionsCount} runs</span>
+                    <span>{t('dashboard.runs').replace('{count}', String(wf.executionsCount))}</span>
                     <span className="font-semibold text-yellow-600">{wf.lastExecuted}</span>
                   </div>
                 </div>
@@ -260,7 +241,7 @@ export const DashboardView: React.FC = () => {
           {/* Activity Log Feed */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">
-              Recent CRM Activity
+              {t('dashboard.recentActivity')}
             </h3>
 
             <div className="space-y-4">

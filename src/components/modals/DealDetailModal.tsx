@@ -38,7 +38,7 @@ export const DealDetailModal: React.FC = () => {
   const currentNotes = editing ? editNotes : (savedNotes || selectedDeal.notes);
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedDeal(null)}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs" onClick={() => setSelectedDeal(null)}>
       <div className="relative bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">

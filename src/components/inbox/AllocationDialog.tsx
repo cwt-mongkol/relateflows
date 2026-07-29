@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useSettings } from '../../context/SettingsContext';
 import { X, User, Building2, FileText, RotateCcw, Clock, History, CheckCircle2 } from 'lucide-react';
 import type { CrmUser } from '../../types/crm';
 
@@ -11,6 +12,7 @@ interface Props {
 
 export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose }) => {
   const { getAllocationHistory, allocateLead } = useCRM();
+  const { t } = useSettings();
 
   const [salesPersonId, setSalesPersonId] = useState('');
   const [salesPersonName, setSalesPersonName] = useState('');
@@ -74,7 +76,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
             <User className="w-5 h-5 text-blue-600" />
-            Allocate Customer
+            {t('allocation.title')}
           </h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
             <X className="w-5 h-5" />
@@ -84,7 +86,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
         <div className="p-5 space-y-4">
           {/* Customer name */}
           <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
-            <p className="text-xs text-blue-600 font-medium">Customer</p>
+            <p className="text-xs text-blue-600 font-medium">{t('allocation.customer')}</p>
             <p className="text-sm font-bold text-slate-900 mt-0.5">{leadName}</p>
           </div>
 
@@ -93,10 +95,11 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2">
               <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <p className="text-xs font-bold text-amber-800">Existing Active Allocation</p>
+                <p className="text-xs font-bold text-amber-800">{t('allocation.existingActive')}</p>
                 <p className="text-[11px] text-amber-700 mt-0.5">
-                  This customer is already allocated to <strong>{activeAlloc.salesPersonName}</strong> for project "{activeAlloc.projectName}".
-                  Update the details below or check "New Allocation" to create a separate allocation.
+                  {t('allocation.existingActiveDesc')
+                    .replace('{sales}', activeAlloc.salesPersonName)
+                    .replace('{project}', activeAlloc.projectName)}
                 </p>
               </div>
             </div>
@@ -105,7 +108,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
           {/* Sales Person */}
           <div>
             <label className="text-xs font-bold text-slate-500 mb-1.5 flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5" /> Sales Person
+              <User className="w-3.5 h-3.5" /> {t('allocation.salesPerson')}
             </label>
             <select
               value={salesPersonId}
@@ -119,25 +122,25 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
             >
-              <option value="">Select Sales Person...</option>
+              <option value="">{t('allocation.selectSales')}</option>
               {salesUsers.map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
             </select>
             {activeAlloc && !isReallocation && (
-              <p className="text-[10px] text-slate-400 mt-1">Pre-filled from existing allocation. Change if needed.</p>
+              <p className="text-[10px] text-slate-400 mt-1">{t('allocation.prefilled')}</p>
             )}
           </div>
 
           {/* Project Name */}
           <div>
             <label className="text-xs font-bold text-slate-500 mb-1.5 flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5" /> Project Name
+              <Building2 className="w-3.5 h-3.5" /> {t('allocation.projectName')}
             </label>
             <input
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
-              placeholder="e.g. RelateFlows Enterprise"
+              placeholder={t('allocation.projectPlaceholder')}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
             />
           </div>
@@ -145,12 +148,12 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
           {/* Notes */}
           <div>
             <label className="text-xs font-bold text-slate-500 mb-1.5 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" /> Notes
+              <FileText className="w-3.5 h-3.5" /> {t('allocation.notes')}
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Additional notes for the Sales person..."
+              placeholder={t('allocation.notesPlaceholder')}
               rows={3}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none"
             />
@@ -168,15 +171,16 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
               <div>
                 <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                   <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
-                  ต้องการ Allocated ใหม่
+                  {t('allocation.reallocate')}
                 </span>
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  If checked, a new allocation will be created instead of updating the existing one.
-                  The customer will be sent to the <strong>same Sales person</strong> as before.
+                  {t('allocation.reallocateDesc')}
                 </p>
                 {activeAlloc && (
                   <p className="text-[10px] text-amber-600 mt-0.5 font-medium">
-                    Will create new allocation. Previous: {activeAlloc.projectName} → {activeAlloc.salesPersonName}
+                    {t('allocation.reallocateSameSales')
+                      .replace('{project}', activeAlloc.projectName)
+                      .replace('{sales}', activeAlloc.salesPersonName)}
                   </p>
                 )}
               </div>
@@ -187,7 +191,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
           {history.length > 0 && (
             <div>
               <h4 className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5" /> Allocation History
+                <History className="w-3.5 h-3.5" /> {t('allocation.history')}
               </h4>
               <div className="space-y-2">
                 {history.map((h) => (
@@ -202,7 +206,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {h.isReallocation && (
-                          <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Re-alloc</span>
+                          <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{t('allocation.reallocBadge')}</span>
                         )}
                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                           h.status === 'active' ? 'bg-emerald-50 text-emerald-700' :
@@ -231,7 +235,7 @@ export const AllocationDialog: React.FC<Props> = ({ leadId, leadName, onClose })
             ) : (
               <CheckCircle2 className="w-4 h-4" />
             )}
-            {isReallocation ? 'Allocate New (Re-allocation)' : (activeAlloc ? 'Update Allocation' : 'Allocate to Sales')}
+            {isReallocation ? t('allocation.submitReallocate') : (activeAlloc ? t('allocation.submitUpdate') : t('allocation.submitCreate'))}
           </button>
         </div>
       </div>

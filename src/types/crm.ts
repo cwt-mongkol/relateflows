@@ -185,6 +185,19 @@ export interface CustomerTag {
   createdAt: string;
 }
 
+export interface TenantCompany {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url: string;
+  domain: string;
+  brand_color_primary: string;
+  brand_color_secondary: string;
+  status: 'active' | 'suspended' | 'deleted';
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AllocationRecord {
   id: number;
   leadId: string;
@@ -252,6 +265,8 @@ export interface CrmUser {
   roleName?: string;
   status: 'active' | 'inactive' | 'suspended';
   createdAt: string;
+  tenantId?: string;
+  companyName?: string;
 }
 
 export interface SocialChannel {
@@ -273,9 +288,62 @@ export interface ChannelAccessRow {
   channelType: string;
 }
 
-export type SettingsTab = 'general' | 'users' | 'roles' | 'channels' | 'access' | 'integrations';
+export interface CustomObject {
+  id: string;
+  tenant_id: string;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string;
+  color: string;
+  status: 'active' | 'inactive';
+  field_count?: number;
+  record_count?: number;
+  created_at: string;
+  updated_at: string;
+}
 
-export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'calendar' | 'tasks' | 'settings';
+export interface CustomField {
+  id: string;
+  tenant_id: string;
+  owner_type: string;
+  owner_id: string;
+  name: string;
+  slug: string;
+  field_type: 'text' | 'number' | 'date' | 'textarea' | 'select' | 'multi_select' | 'boolean' | 'url' | 'email' | 'phone' | 'relation';
+  options: string[];
+  reference_owner: string;
+  required: boolean;
+  placeholder: string;
+  default_value: string;
+  ordering: number;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomRecord {
+  id: string;
+  tenant_id: string;
+  object_id: string;
+  data: Record<string, any>;
+  created_by: string;
+  created_by_name?: string;
+  created_by_avatar?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SettingsTab = 'general' | 'users' | 'roles' | 'channels' | 'access' | 'integrations' | 'companies' | 'custom-objects' | 'chatbot' | 'cs-admin' | 'lead-allocation';
+
+export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'calendar' | 'tasks' | 'settings' | 'cs-queue';
 
 export type ProductFormData = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 export type CategoryFormData = Omit<Category, 'id' | 'createdAt'>;
+
+export interface QuickReply {
+  id: string;
+  label: string;
+  message: string;
+  createdAt: string;
+}

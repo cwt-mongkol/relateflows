@@ -1,9 +1,15 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { X, Mail, Phone, Building2, Award, Clock, Trash2, Lightbulb } from 'lucide-react';
 
 export const ContactDrawer: React.FC = () => {
   const { selectedContact, setSelectedContact, deleteContact, deals, activities, setCurrentView } = useCRM();
+  const [closing, setClosing] = useState(false);
+
+  const close = useCallback(() => {
+    setClosing(true);
+    setTimeout(() => setSelectedContact(null), 380);
+  }, [setSelectedContact]);
 
   const linkedDeals = useMemo(() => {
     if (!selectedContact) return [];
@@ -25,35 +31,55 @@ export const ContactDrawer: React.FC = () => {
   if (!selectedContact) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden animate-fadeIn">
-      <div onClick={() => setSelectedContact(null)} className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" />
+    <div className="fixed inset-0 z-50 overflow-hidden">
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes slideOutRight {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+        .drawer-backdrop-open { animation: fadeIn 0.25s ease-out both; }
+        .drawer-backdrop-close { animation: fadeOut 0.3s ease-in both; }
+        .drawer-panel-open { animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .drawer-panel-close { animation: slideOutRight 0.35s cubic-bezier(0.4, 0, 0.2, 1) both; }
+      `}</style>
+      <div onClick={close} className={`absolute inset-0 bg-slate-900/40 backdrop-blur-xs ${closing ? 'drawer-backdrop-close' : 'drawer-backdrop-open'}`} />
 
-      <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
+      <div className={`absolute inset-y-0 right-0 max-w-full flex pl-4 md:pl-10 ${closing ? 'drawer-panel-close' : 'drawer-panel-open'}`}>
         <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200">
           {/* Header */}
-          <div className="p-6 bg-gradient-to-r from-blue-900 to-blue-800 text-white flex items-center justify-between relative overflow-hidden">
-            <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-yellow-400/15 rounded-full blur-2xl pointer-events-none" />
-
-            <div className="flex items-center gap-4 relative z-10">
+          <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-4">
               <div className="relative">
-                <img src={selectedContact.avatar} alt={selectedContact.name} className="w-14 h-14 rounded-2xl object-cover ring-2 ring-yellow-400 shadow-md" />
+                <img src={selectedContact.avatar} alt={selectedContact.name} className="w-14 h-14 rounded-2xl object-cover ring-2 ring-slate-200 shadow-sm" />
                 <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white" title="Active Contact" />
               </div>
               <div>
-                <h3 className="text-lg font-extrabold text-white">{selectedContact.name}</h3>
-                <p className="text-xs text-blue-200 font-medium">{selectedContact.role} at {selectedContact.company}</p>
+                <h3 className="text-lg font-extrabold text-slate-900">{selectedContact.name}</h3>
+                <p className="text-xs text-slate-500 font-medium">{selectedContact.role} at {selectedContact.company}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-yellow-500 text-white shadow-xs">
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                     Score: {selectedContact.leadScore}
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/20 text-white uppercase tracking-wider">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wider">
                     {selectedContact.lifecycleStage}
                   </span>
                 </div>
               </div>
             </div>
 
-            <button onClick={() => setSelectedContact(null)} className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all relative z-10">
+            <button onClick={close} className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -117,7 +143,7 @@ export const ContactDrawer: React.FC = () => {
                   {linkedDeals.map((deal) => (
                     <div
                       key={deal.id}
-                      onClick={() => { setSelectedContact(null); setCurrentView('pipeline'); }}
+                      onClick={() => { close(); setTimeout(() => setCurrentView('pipeline'), 400); }}
                       className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between hover:border-blue-200 hover:bg-blue-50/50 cursor-pointer transition-all"
                     >
                       <div className="min-w-0">
@@ -169,7 +195,7 @@ export const ContactDrawer: React.FC = () => {
             <button onClick={() => deleteContact(selectedContact.id)} className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1.5 p-2 rounded-xl hover:bg-rose-50 transition-all">
               <Trash2 className="w-4 h-4" /><span>Delete Contact</span>
             </button>
-            <button onClick={() => setSelectedContact(null)} className="text-xs text-slate-600 font-bold px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 transition-all">
+            <button onClick={close} className="text-xs text-slate-600 font-bold px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 transition-all">
               Close Drawer
             </button>
           </div>
