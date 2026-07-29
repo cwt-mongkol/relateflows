@@ -6,7 +6,6 @@
   "framework": "vite",
   "functions": {
     "api/index.js": {
-      "runtime": "@vercel/node@4",
       "maxDuration": 30,
       "memory": 512
     }
