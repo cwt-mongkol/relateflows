@@ -336,6 +336,66 @@ CREATE INDEX IF NOT EXISTS idx_social_channels_tenant ON social_channels(tenant_
 CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_companies_tenant ON companies(tenant_id);
 
+-- ===== Dynamic Objects / Custom Fields Schema =====
+
+CREATE TABLE IF NOT EXISTS custom_objects (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT '',
+    icon VARCHAR(50) DEFAULT 'table',
+    color VARCHAR(7) DEFAULT '#6366f1',
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS custom_fields (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    owner_type VARCHAR(100) NOT NULL,
+    owner_id VARCHAR(50) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    field_type VARCHAR(50) NOT NULL DEFAULT 'text',
+    options JSONB DEFAULT '[]',
+    reference_owner VARCHAR(100) DEFAULT '',
+    required BOOLEAN DEFAULT false,
+    placeholder VARCHAR(255) DEFAULT '',
+    default_value TEXT DEFAULT '',
+    ordering INT DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, owner_type, owner_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cf_owner ON custom_fields(tenant_id, owner_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS custom_records (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    object_id VARCHAR(50) REFERENCES custom_objects(id) ON DELETE CASCADE,
+    data JSONB NOT NULL DEFAULT '{}',
+    created_by VARCHAR(50) DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cr_object ON custom_records(tenant_id, object_id);
+
+-- Tenant settings (encrypted integration keys, etc.)
+CREATE TABLE IF NOT EXISTS tenant_settings (
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    key VARCHAR(255) NOT NULL,
+    value_encrypted TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, key)
+);
+
 -- Enable Row-Level Security on tenant tables
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deals ENABLE ROW LEVEL SECURITY;
@@ -646,63 +706,5 @@ SELECT id, 'tenant-default-001', FALSE, role_id FROM users
 WHERE tenant_id IS NULL AND role_id = 1
 ON CONFLICT DO NOTHING;
 
--- ===== Dynamic Objects / Custom Fields Schema =====
 
-CREATE TABLE IF NOT EXISTS custom_objects (
-    id VARCHAR(50) PRIMARY KEY,
-    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(100) NOT NULL,
-    description TEXT DEFAULT '',
-    icon VARCHAR(50) DEFAULT 'table',
-    color VARCHAR(7) DEFAULT '#6366f1',
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(tenant_id, slug)
-);
-
-CREATE TABLE IF NOT EXISTS custom_fields (
-    id VARCHAR(50) PRIMARY KEY,
-    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
-    owner_type VARCHAR(100) NOT NULL,
-    owner_id VARCHAR(50) NOT NULL DEFAULT '',
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(100) NOT NULL,
-    field_type VARCHAR(50) NOT NULL DEFAULT 'text',
-    options JSONB DEFAULT '[]',
-    reference_owner VARCHAR(100) DEFAULT '',
-    required BOOLEAN DEFAULT false,
-    placeholder VARCHAR(255) DEFAULT '',
-    default_value TEXT DEFAULT '',
-    ordering INT DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(tenant_id, owner_type, owner_id, slug)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cf_owner ON custom_fields(tenant_id, owner_type, owner_id);
-
-CREATE TABLE IF NOT EXISTS custom_records (
-    id VARCHAR(50) PRIMARY KEY,
-    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
-    object_id VARCHAR(50) REFERENCES custom_objects(id) ON DELETE CASCADE,
-    data JSONB NOT NULL DEFAULT '{}',
-    created_by VARCHAR(50) DEFAULT '',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_cr_object ON custom_records(tenant_id, object_id);
-
--- Tenant settings (encrypted integration keys, etc.)
-CREATE TABLE IF NOT EXISTS tenant_settings (
-    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
-    key VARCHAR(255) NOT NULL,
-    value_encrypted TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, key)
-);
 
