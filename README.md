@@ -60,3 +60,4 @@ src/
 ├── main.tsx           — provider hierarchy
 └── index.css          — Tailwind + dark mode overrides
 ```
+
