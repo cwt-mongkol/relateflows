@@ -278,58 +278,76 @@ async function auditLog(userId, tenantId, action, targetType, targetId, details 
 // Helper: ensure user exists in `users` table, return full user + role_id
 async function ensureUser(user) {
   try {
-    // Check if user was pre-created (invited) by email — prefer invited user by created_at DESC (most recent)
-    const existing = await pool.query(`SELECT id, tenant_id, role_id FROM users WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, [user.email]).catch(() => ({ rows: [] }));
+    // ── Step 1: Look up existing account by email (cross-provider linking) ──
+    // If a user signs in via LINE/Facebook with the same email as their Google account,
+    // we reuse the existing user record instead of creating a duplicate.
+    const existing = await pool.query(
+      `SELECT id, tenant_id, role_id, provider FROM users WHERE email = $1 ORDER BY created_at ASC LIMIT 1`,
+      [user.email]
+    ).catch(() => ({ rows: [] }));
+
+    const isLinking = existing.rows.length > 0 && existing.rows[0].id !== user.id;
+    const isSameProvider = existing.rows.length > 0 && existing.rows[0].id === user.id;
+
     if (existing.rows.length > 0) {
+      // Use the canonical (oldest/primary) account's ID and settings
       user.id = existing.rows[0].id;
-      user.tenant_id = existing.rows[0].tenant_id;
+      user.tenant_id = user.tenant_id || existing.rows[0].tenant_id;
       if (!user.role_id) user.role_id = existing.rows[0].role_id;
     }
-    // Resolve tenant_id: only from invite (email match) or demo fallback — NO domain matching
+
+    // ── Step 2: Resolve tenant_id ──
     const isSuperAdmin = user.role_id === 1;
     let tenantId = user.tenant_id || null;
     if (!isSuperAdmin && !tenantId) {
-      // Fall back to demo tenant if no invite found
       const tRes = await pool.query('SELECT id FROM tenant_companies WHERE slug = $1 LIMIT 1', ['relateflows-demo']);
       if (tRes.rows.length > 0) tenantId = tRes.rows[0].id;
     }
     const roleId = user.role_id || null;
-    await pool.query(`
-      INSERT INTO users (id, name, email, avatar, provider, role_id, tenant_id, status)
-      VALUES ($1, $2, $3, $4, $5, COALESCE($7::int, (SELECT id FROM roles WHERE name LIKE '%Sales Rep%' LIMIT 1), 5), $6, 'active')
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        avatar = EXCLUDED.avatar,
-        provider = EXCLUDED.provider,
-        role_id = COALESCE($7::int, users.role_id, (SELECT id FROM roles WHERE name LIKE '%Sales Rep%' LIMIT 1), 5),
-        tenant_id = CASE WHEN $7::int = 1 THEN NULL ELSE COALESCE(users.tenant_id, EXCLUDED.tenant_id) END,
-        updated_at = NOW()
-    `, [user.id, user.name, user.email, user.avatar, user.provider, tenantId, roleId]);
 
-    // Ensure user_tenants mapping for pre-invited users
-    if (tenantId && existing.rows.length > 0 && existing.rows[0].tenant_id) {
+    if (isLinking) {
+      // ── Account Linking: email matched a different provider's account ──
+      // Only update name/avatar. Keep the original provider as-is.
+      // Log the linked provider for tracking.
+      console.log(`[Auth] Account linking: ${user.provider} → existing account ${user.id} (primary provider: ${existing.rows[0].provider})`);
       await pool.query(`
-        INSERT INTO user_tenants (user_id, tenant_id, is_default, role_id)
-        VALUES ($1, $2, TRUE, COALESCE($3::int, (SELECT role_id FROM users WHERE id = $1)))
-        ON CONFLICT (user_id, tenant_id) DO UPDATE SET
-          is_default = TRUE,
-          role_id = COALESCE($3::int, user_tenants.role_id)
-      `, [user.id, tenantId, user.role_id]).catch(() => {});
+        UPDATE users SET
+          name   = COALESCE(NULLIF($2, ''), name),
+          avatar = COALESCE(NULLIF($3, ''), avatar),
+          updated_at = NOW()
+        WHERE id = $1
+      `, [user.id, user.name, user.avatar]);
+    } else {
+      // ── Normal upsert: same provider re-login or brand new user ──
+      await pool.query(`
+        INSERT INTO users (id, name, email, avatar, provider, role_id, tenant_id, status)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($7::int, (SELECT id FROM roles WHERE name LIKE '%Sales Rep%' LIMIT 1), 5), $6, 'active')
+        ON CONFLICT (id) DO UPDATE SET
+          name       = EXCLUDED.name,
+          email      = EXCLUDED.email,
+          avatar     = EXCLUDED.avatar,
+          provider   = EXCLUDED.provider,
+          role_id    = COALESCE($7::int, users.role_id, (SELECT id FROM roles WHERE name LIKE '%Sales Rep%' LIMIT 1), 5),
+          tenant_id  = CASE WHEN $7::int = 1 THEN NULL ELSE COALESCE(users.tenant_id, EXCLUDED.tenant_id) END,
+          updated_at = NOW()
+      `, [user.id, user.name, user.email, user.avatar, user.provider, tenantId, roleId]);
     }
 
-    // Sync user_tenants: ensure user has access to their active tenant
+    // ── Step 3: Sync user_tenants mapping ──
     if (tenantId) {
       await pool.query(`
         INSERT INTO user_tenants (user_id, tenant_id, is_default, role_id)
         VALUES ($1, $2, TRUE, $3)
         ON CONFLICT (user_id, tenant_id) DO UPDATE SET
           is_default = TRUE,
-          role_id = COALESCE($3, user_tenants.role_id)
-      `, [user.id, tenantId, roleId]);
+          role_id    = COALESCE($3, user_tenants.role_id)
+      `, [user.id, tenantId, roleId]).catch(() => {});
     }
 
-    const result = await pool.query('SELECT u.*, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = $1', [user.id]);
+    const result = await pool.query(
+      'SELECT u.*, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = $1',
+      [user.id]
+    );
     return result.rows[0] || user;
   } catch (err) {
     console.error('Failed to ensure user:', err.message);
