@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSettings, type IntegrationKeys } from '../../context/SettingsContext';
 import { useCRM } from '../../context/CRMContext';
-import { Bot, Palette, CheckCircle2, Save, Globe, Sun, Moon, Monitor, Sliders, Kanban, Plus, X, Edit3, Key, MessageCircle, MessageSquare, Eye, EyeOff, Shield, Users, Radio, Lock, Building2, Loader2, Database, Mail, Phone, Headphones } from 'lucide-react';
+import { Bot, Palette, CheckCircle2, Save, Globe, Sun, Moon, Monitor, Sliders, Kanban, Plus, X, Edit3, Key, MessageCircle, MessageSquare, Eye, EyeOff, Shield, Users, Radio, Lock, Building2, Loader2, Database, Mail, Phone, Headphones, Search, Trash2, Power, AlertTriangle } from 'lucide-react';
 import { STAGE_COLORS } from '../../data/mockData';
 import type { SettingsTab } from '../../types/crm';
 import { usePermissions } from '../../lib/permissions';
@@ -452,6 +452,19 @@ const SuperAdminCompanyManager: React.FC = () => {
   const [form, setForm] = useState({ name: '', slug: '', domain: '' });
   const [creating, setCreating] = useState(false);
 
+  // Search & Autocomplete
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Edit / Update
+  const [editingCompany, setEditingCompany] = useState<TenantCompany | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', slug: '', domain: '', status: 'active' });
+  const [updating, setUpdating] = useState(false);
+
+  // Delete Action Modal
+  const [deleteTarget, setDeleteTarget] = useState<TenantCompany | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -468,15 +481,56 @@ const SuperAdminCompanyManager: React.FC = () => {
     if (!form.name.trim() || !form.slug.trim()) return;
     setCreating(true);
     try {
-      const res = await api.post<any>('/api/admin/tenants', form);
-      if (Array.isArray(res)) setCompanies(res);
-      else if (res?.data) { setCompanies(res.data); }
+      await api.post<any>('/api/admin/tenants', form);
       setShowForm(false);
       setForm({ name: '', slug: '', domain: '' });
       load();
     } catch {}
     setCreating(false);
   };
+
+  const handleStartEdit = (c: TenantCompany) => {
+    setEditingCompany(c);
+    setEditForm({
+      name: c.name,
+      slug: c.slug,
+      domain: c.domain || '',
+      status: c.status || 'active'
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editingCompany || !editForm.name.trim() || !editForm.slug.trim()) return;
+    setUpdating(true);
+    try {
+      await api.put(`/api/admin/tenants/${editingCompany.id}`, editForm);
+      setEditingCompany(null);
+      load();
+    } catch {}
+    setUpdating(false);
+  };
+
+  const handleDelete = async (type: 'soft' | 'hard') => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/admin/tenants/${deleteTarget.id}?type=${type}`);
+      setDeleteTarget(null);
+      load();
+    } catch {}
+    setDeleting(false);
+  };
+
+  // Filter companies based on search query
+  const filteredCompanies = companies.filter(c =>
+    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (c.domain || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const suggestions = searchQuery.trim() 
+    ? companies.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5)
+    : [];
 
   if (loading) {
     return (
@@ -488,17 +542,73 @@ const SuperAdminCompanyManager: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h4 className="text-sm font-extrabold text-slate-900">Companies</h4>
           <p className="text-xs text-slate-500 mt-0.5">Manage all registered companies/tenants</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all">
+        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all self-start sm:self-auto">
           <Plus className="w-3.5 h-3.5" />
           Create Company
         </button>
       </div>
 
+      {/* Autocomplete Search input */}
+      <div className="relative">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              setShowSuggestions(true);
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Search and autocomplete companies by name or slug..."
+            className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Autocomplete Dropdown List */}
+        {showSuggestions && suggestions.length > 0 && (
+          <div className="absolute z-10 w-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg divide-y divide-slate-100 max-h-60 overflow-y-auto">
+            {suggestions.map(c => (
+              <button
+                key={c.id}
+                onClick={() => {
+                  setSearchQuery(c.name);
+                  setShowSuggestions(false);
+                }}
+                className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center justify-between transition-colors"
+              >
+                <div>
+                  <p className="text-xs font-bold text-slate-800">{c.name}</p>
+                  <p className="text-[10px] text-slate-400">{c.slug} {c.domain ? `· ${c.domain}` : ''}</p>
+                </div>
+                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{c.status}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {showSuggestions && searchQuery.trim() && suggestions.length === 0 && (
+          <div className="absolute z-10 w-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg p-3 text-center text-xs text-slate-400">
+            No matching companies found
+          </div>
+        )}
+        {/* Hide autocomplete dropdown on click outside */}
+        {showSuggestions && (
+          <div className="fixed inset-0 -z-10" onClick={() => setShowSuggestions(false)} />
+        )}
+      </div>
+
+      {/* Create Company Form */}
       {showForm && (
         <div className="bg-blue-50/50 border border-blue-200 rounded-2xl p-5 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -516,14 +626,91 @@ const SuperAdminCompanyManager: React.FC = () => {
         </div>
       )}
 
+      {/* Edit Company Modal */}
+      {editingCompany && (
+        <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-6 space-y-4">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">Edit Company</h3>
+              <p className="text-xs text-slate-500">Modify details for {editingCompany.name}</p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Company Name</label>
+                <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Company name" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Slug</label>
+                <input value={editForm.slug} onChange={e => setEditForm({ ...editForm, slug: e.target.value.replace(/[^a-z0-9-]/g, '') })} placeholder="Slug" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Domain</label>
+                <input value={editForm.domain} onChange={e => setEditForm({ ...editForm, domain: e.target.value })} placeholder="Domain" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Status</label>
+                <select value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended / Deactivated</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button onClick={handleUpdate} disabled={updating || !editForm.name.trim() || !editForm.slug.trim()} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5">
+                {updating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Save Changes
+              </button>
+              <button onClick={() => setEditingCompany(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold py-2.5 rounded-xl transition-all">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete / Deactivate Confirmation Dialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Manage Company Deletion</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Choose how you want to remove the company: <strong>{deleteTarget.name}</strong></p>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
+              <p>💡 <strong>1. ยกเลิกการใช้งาน (Deactivate):</strong> บัญชีจะถูกระงับชั่วคราว ข้อมูลทั้งหมดของบริษัทจะ <u>ยังคงอยู่ในระบบหลังบ้าน</u> สามารถเปิดใช้งานใหม่ได้ภายหลัง</p>
+              <p>⚠️ <strong>2. ลบข้อมูลถาวร (Delete Permanently):</strong> ข้อมูลทั้งหมดของบริษัท รวมทั้งผู้ใช้งาน แชท ดีล แท็ก คอนแทค จะถูก <u>ลบออกจากระบบโดยถาวรทันที</u> ไม่สามารถกู้คืนได้</p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              <div className="flex gap-2">
+                <button onClick={() => handleDelete('soft')} disabled={deleting} className="flex-1 flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2.5 rounded-xl transition-all">
+                  <Power className="w-3.5 h-3.5" />
+                  ยกเลิกการใช้งาน
+                </button>
+                <button onClick={() => handleDelete('hard')} disabled={deleting} className="flex-1 flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2.5 rounded-xl transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  ลบข้อมูลถาวร
+                </button>
+              </div>
+              <button onClick={() => setDeleteTarget(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold py-2.5 rounded-xl transition-all mt-1">ยกเลิก (Cancel)</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Companies List */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100">
-        {companies.length === 0 ? (
+        {filteredCompanies.length === 0 ? (
           <div className="p-8 text-center text-slate-400">
             <Building2 className="w-8 h-8 mx-auto mb-2 stroke-[1.5]" />
-            <p className="text-xs font-medium">No companies yet</p>
+            <p className="text-xs font-medium">No matching companies found</p>
           </div>
-        ) : companies.map(c => (
-          <div key={c.id} className="flex items-center gap-3 p-4">
+        ) : filteredCompanies.map(c => (
+          <div key={c.id} className="flex items-center gap-3 p-4 hover:bg-slate-50/40 transition-colors">
             <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
               <Building2 className="w-4 h-4" />
             </div>
@@ -531,7 +718,19 @@ const SuperAdminCompanyManager: React.FC = () => {
               <p className="text-xs font-bold text-slate-900 truncate">{c.name}</p>
               <p className="text-[10px] text-slate-500 truncate">{c.slug}{c.domain ? ` · ${c.domain}` : ''}</p>
             </div>
-            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{c.status}</span>
+            <div className="flex items-center gap-3">
+              <span className={`text-[9px] font-bold px-2.5 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {c.status}
+              </span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => handleStartEdit(c)} className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors" title="Edit Company">
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setDeleteTarget(c)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100 transition-colors" title="Delete / Deactivate">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         ))}
       </div>

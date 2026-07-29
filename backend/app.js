@@ -730,6 +730,59 @@ app.post('/api/admin/tenants', authenticateToken, requireSuperAdmin, async (req,
   }
 });
 
+// PUT /api/admin/tenants/:id — update an existing company
+app.put('/api/admin/tenants/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, slug, domain, status } = req.body;
+  if (!name || !slug) {
+    return res.status(400).json({ error: 'Company name and slug are required' });
+  }
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE tenant_companies 
+       SET name = $1, slug = $2, domain = $3, status = $4, updated_at = NOW() 
+       WHERE id = $5`,
+      [name, slug, domain || '', status || 'active', id]
+    );
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+    res.json({ message: 'Company updated successfully' });
+  } catch (err) {
+    console.error('Error updating tenant:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/tenants/:id — delete a company (soft or hard)
+app.delete('/api/admin/tenants/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { type } = req.query; // 'soft' (deactivate/suspend) or 'hard' (delete permanently)
+  try {
+    if (type === 'hard') {
+      const { rowCount } = await pool.query('DELETE FROM tenant_companies WHERE id = $1', [id]);
+      if (rowCount === 0) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+      res.json({ message: 'Company permanently deleted' });
+    } else {
+      // Default is soft delete: update status to 'suspended'
+      const { rowCount } = await pool.query(
+        "UPDATE tenant_companies SET status = 'suspended', updated_at = NOW() WHERE id = $1",
+        [id]
+      );
+      if (rowCount === 0) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+      res.json({ message: 'Company deactivated successfully (soft deleted)' });
+    }
+  } catch (err) {
+    console.error('Error deleting/deactivating tenant:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // --- Category Routes (tb_categories) ---
 
 app.get('/api/categories', async (req, res) => {
