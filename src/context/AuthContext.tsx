@@ -141,7 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithGoogle = useCallback(async (credential: string) => {
     setIsLoading(true);
     try {
-      const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/google', { credential });
+      const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/google', { access_token: credential });
       handleLoginResult(res);
     } catch (err) {
       console.error('Google login failed:', err);

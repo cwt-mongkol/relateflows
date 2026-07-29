@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { GoogleLogin } from '@react-oauth/google';
+import { useGoogleLogin } from '@react-oauth/google';
 
 import { Shield, Users, Briefcase, Headphones, MessageCircle, Globe, BarChart3, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -25,6 +25,12 @@ export const LoginPage: React.FC = () => {
   const leftRef = useRef<HTMLDivElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const [showDevTools, setShowDevTools] = useState(false);
+
+  const googleLogin = useGoogleLogin({
+    onSuccess: tokenResponse => loginWithGoogle(tokenResponse.access_token),
+    onError: () => console.error('Google Sign In failed'),
+    flow: 'implicit',
+  });
 
   useEffect(() => {
     const el = leftRef.current;
@@ -194,22 +200,27 @@ export const LoginPage: React.FC = () => {
           <p className="text-sm text-slate-500 mt-1 mb-8 text-center">Sign in to continue to your dashboard</p>
 
           <div className="space-y-3.5">
-            {/* Google Login */}
-            <div className="flex justify-center w-full">
-              <GoogleLogin
-                onSuccess={credentialResponse => {
-                  if (credentialResponse.credential) {
-                    loginWithGoogle(credentialResponse.credential);
-                  }
-                }}
-                onError={() => {
-                  console.error('Google Sign In failed');
-                }}
-                theme="outline"
-                size="large"
-                width="340px"
-              />
-            </div>
+            {/* Google Login — custom styled button */}
+            <button
+              onClick={() => googleLogin()}
+              disabled={isLoading}
+              className="btn-lift w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
+            >
+              {isLoading ? (
+                <span className="loading loading-spinner loading-sm" />
+              ) : (
+                <svg aria-label="Google logo" width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                  <g>
+                    <path d="m0 0H512V512H0" fill="#fff"/>
+                    <path fill="#34a853" d="M153 292c30 82 118 95 171 60h62v48A192 192 0 0190 341"/>
+                    <path fill="#4285f4" d="m386 400a140 175 0 0053-179H260v74h102q-7 37-38 57"/>
+                    <path fill="#fbbc02" d="m90 341a208 200 0 010-171l63 49q-12 37 0 73"/>
+                    <path fill="#ea4335" d="m153 219c22-69 116-109 179-50l55-54c-78-75-230-72-297 55"/>
+                  </g>
+                </svg>
+              )}
+              <span>Login with Google</span>
+            </button>
 
             {/* Facebook Login */}
             <button onClick={handleFacebookLogin} disabled={isLoading}

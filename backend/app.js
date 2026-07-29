@@ -339,27 +339,45 @@ async function ensureUser(user) {
 
 // POST /api/auth/google
 app.post('/api/auth/google', async (req, res) => {
-  const { credential } = req.body;
-  if (!credential) return res.status(400).json({ error: 'Missing credential' });
+  const { credential, access_token } = req.body;
+  if (!credential && !access_token) return res.status(400).json({ error: 'Missing credential or access_token' });
   try {
     if (!GOOGLE_CLIENT_ID) {
       return res.status(400).json({ error: 'Google authentication not configured on server' });
     }
-    const ticket = await googleOAuthClient.verifyIdToken({
-      idToken: credential,
-      audience: GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload || !payload.sub) {
-      return res.status(401).json({ error: 'Invalid Google credential' });
+    let user;
+    if (access_token) {
+      // Implicit flow: exchange access_token for user profile via Google userinfo endpoint
+      const infoRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo`, {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+      if (!infoRes.ok) return res.status(401).json({ error: 'Invalid Google access_token' });
+      const payload = await infoRes.json();
+      user = {
+        id: payload.sub,
+        name: payload.name || 'Google User',
+        email: payload.email || '',
+        avatar: payload.picture || '',
+        provider: 'google',
+      };
+    } else {
+      // One Tap / credential flow: verify id_token
+      const ticket = await googleOAuthClient.verifyIdToken({
+        idToken: credential,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (!payload || !payload.sub) {
+        return res.status(401).json({ error: 'Invalid Google credential' });
+      }
+      user = {
+        id: payload.sub,
+        name: payload.name || 'Google User',
+        email: payload.email || '',
+        avatar: payload.picture || '',
+        provider: 'google',
+      };
     }
-    const user = {
-      id: payload.sub,
-      name: payload.name || 'Google User',
-      email: payload.email || '',
-      avatar: payload.picture || '',
-      provider: 'google',
-    };
     const fullUser = await ensureUser(user);
     res.json(issueTokens(fullUser));
   } catch (err) {
