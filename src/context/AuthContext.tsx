@@ -143,9 +143,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/google', { access_token: credential });
       handleLoginResult(res);
-    } catch (err) {
-      console.error('Google login failed:', err);
-      addToast('Backend is not available. Please try again later.', 'error');
+    } catch (err: any) {
+      if (err?.status === 403 || err?.error === 'not_invited') {
+        addToast('⛔คุณยังไม่ได้รับการเชิญเข้าใช้งานระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน', 'error');
+      } else {
+        console.error('Google login failed:', err);
+        addToast('Backend is not available. Please try again later.', 'error');
+      }
     }
     setIsLoading(false);
   }, [handleLoginResult]);
@@ -156,9 +160,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const redirectUri = window.location.origin;
       const res = await api.post<{ accessToken: string; refreshToken: string; user: AuthUser }>('/api/auth/line', { code, redirect_uri: redirectUri });
       handleLoginResult(res);
-    } catch (err) {
-      console.error('LINE login failed:', err);
-      addToast('LINE login failed. Please try again.', 'error');
+    } catch (err: any) {
+      if (err?.status === 403 || err?.error === 'not_invited') {
+        addToast('⛔คุณยังไม่ได้รับการเชิญเข้าใช้งานระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน', 'error');
+      } else {
+        console.error('LINE login failed:', err);
+        addToast('LINE login failed. Please try again.', 'error');
+      }
     }
     setIsLoading(false);
   }, [handleLoginResult]);

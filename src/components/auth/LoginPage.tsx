@@ -292,7 +292,7 @@ export const LoginPage: React.FC = () => {
           </div>
 
           <p className="text-[10px] text-slate-400 text-center mt-7 leading-relaxed">
-            By signing in, you agree to our Terms of Service and Privacy Policy.
+            By signing in, you agree to our <a href="/terms" className="text-blue-500 hover:text-blue-700 hover:underline font-semibold">Terms of Service</a> and <a href="/privacy" className="text-blue-500 hover:text-blue-700 hover:underline font-semibold">Privacy Policy</a>.
           </p>
         </div>
       </div>

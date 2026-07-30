@@ -20,6 +20,8 @@ import { AddWorkflowModal } from './components/modals/AddWorkflowModal';
 import { ContactDrawer } from './components/drawers/ContactDrawer';
 import { DealDetailModal } from './components/modals/DealDetailModal';
 import { LoginPage } from './components/auth/LoginPage';
+import { PrivacyPolicy } from './components/legal/PrivacyPolicy';
+import { TermsOfService } from './components/legal/TermsOfService';
 
 const MainContent: React.FC = () => {
   const { currentView } = useCRM();
@@ -107,6 +109,15 @@ export function App() {
         <span className="loading loading-spinner loading-md text-slate-400" />
       </div>
     );
+  }
+
+  // Public legal pages (no auth required)
+  const path = window.location.pathname;
+  if (path === '/privacy' || path === '/privacy-policy') {
+    return <PrivacyPolicy />;
+  }
+  if (path === '/terms' || path === '/terms-of-service') {
+    return <TermsOfService />;
   }
 
   if (!isAuthenticated) {

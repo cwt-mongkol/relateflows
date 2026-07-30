@@ -294,6 +294,13 @@ async function ensureUser(user) {
       user.id = existing.rows[0].id;
       user.tenant_id = user.tenant_id || existing.rows[0].tenant_id;
       if (!user.role_id) user.role_id = existing.rows[0].role_id;
+    } else {
+      // ── INVITE-ONLY: reject any user not pre-registered in the system ──
+      // Only users that have been invited (pre-created in the users table) can log in.
+      // Super Admin (admin-primary) is always pre-seeded so this never blocks them.
+      const notInvited = new Error('Access denied: You have not been invited to use this system.');
+      notInvited.code = 'NOT_INVITED';
+      throw notInvited;
     }
 
     // ── Step 2: Resolve tenant_id ──
@@ -350,8 +357,10 @@ async function ensureUser(user) {
     );
     return result.rows[0] || user;
   } catch (err) {
+    // Re-throw invite-only errors so the auth endpoints can return 403
+    if (err.code === 'NOT_INVITED') throw err;
     console.error('Failed to ensure user:', err.message);
-    return user;
+    throw err;
   }
 }
 
@@ -399,6 +408,9 @@ app.post('/api/auth/google', async (req, res) => {
     const fullUser = await ensureUser(user);
     res.json(issueTokens(fullUser));
   } catch (err) {
+    if (err.code === 'NOT_INVITED') {
+      return res.status(403).json({ error: 'not_invited', message: 'คุณยังไม่ได้รับการเชิญเข้าใช้งานระบบ กรุณาติดต่อผู้ดูแลระบบ' });
+    }
     console.error('Google auth error:', err);
     res.status(401).json({ error: 'Invalid Google credential' });
   }
@@ -451,6 +463,9 @@ app.post('/api/auth/line', async (req, res) => {
     const fullUser = await ensureUser(user);
     res.json(issueTokens(fullUser));
   } catch (err) {
+    if (err.code === 'NOT_INVITED') {
+      return res.status(403).json({ error: 'not_invited', message: 'คุณยังไม่ได้รับการเชิญเข้าใช้งานระบบ กรุณาติดต่อผู้ดูแลระบบ' });
+    }
     console.error('LINE auth error:', err);
     res.status(401).json({ error: 'LINE authentication failed' });
   }
@@ -487,6 +502,9 @@ app.post('/api/auth/facebook', async (req, res) => {
     const fullUser = await ensureUser(user);
     res.json(issueTokens(fullUser));
   } catch (err) {
+    if (err.code === 'NOT_INVITED') {
+      return res.status(403).json({ error: 'not_invited', message: 'คุณยังไม่ได้รับการเชิญเข้าใช้งานระบบ กรุณาติดต่อผู้ดูแลระบบ' });
+    }
     console.error('Facebook auth error:', err);
     res.status(401).json({ error: 'Facebook authentication failed' });
   }
@@ -1684,9 +1702,8 @@ app.post('/api/users', authorize('settings_user_management:view_add_edit_deactiv
     const trimmedName = name.trim();
     const trimmedEmail = (email || '').trim();
     const assignedRoleId = role_id || 5;
-    const isSuperAdminInviter = req.user.role_id === 1;
-    if (!isSuperAdminInviter && assignedRoleId === 1) {
-      return res.status(403).json({ error: 'Only Super Admin can assign the Super Admin role' });
+    if (assignedRoleId === 1) {
+      return res.status(403).json({ error: 'Super Admin accounts cannot be created via invite. Only the platform owner can be Super Admin.' });
     }
 
     // UPSERT by email to prevent duplicates: if user exists, update their info for this tenant
@@ -1732,13 +1749,12 @@ app.patch('/api/users/:id', authorize('settings_user_management:view_add_edit_de
   try {
     const { id } = req.params;
     const { name, role_id, status } = req.body;
-    const isSuperAdminEditing = req.user.role_id === 1;
     if (role_id !== undefined && role_id !== null) {
       if (typeof role_id !== 'number' || role_id < 1 || role_id > 5) {
         return res.status(400).json({ error: 'role_id must be between 1 and 5' });
       }
-      if (!isSuperAdminEditing && role_id === 1) {
-        return res.status(403).json({ error: 'Only Super Admin can assign role_id 1' });
+      if (role_id === 1) {
+        return res.status(403).json({ error: 'Super Admin role cannot be assigned to other users' });
       }
     }
     const result = await pool.query(

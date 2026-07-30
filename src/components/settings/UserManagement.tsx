@@ -164,7 +164,7 @@ export const UserManagement: React.FC = () => {
                 className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
               >
                 <option value="" disabled>Role</option>
-                {roles.map(r => (
+                {roles.filter(r => r.id > 1).map(r => (
                   <option key={r.id} value={r.id}>{r.name}</option>
                 ))}
               </select>
