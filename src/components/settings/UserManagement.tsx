@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import type { CrmUser } from '../../types/crm';
+import { SortableTable } from '../ui/SortableTable';
 import { Shield, CheckCircle2, XCircle, AlertCircle, UserPlus, Loader2, X, Building2 } from 'lucide-react';
 
 interface TenantInfo {
@@ -75,7 +76,14 @@ export const UserManagement: React.FC = () => {
     setInviting(false);
   };
 
-  if (loading) return <div className="text-sm text-slate-500 p-6">Loading users...</div>;
+  if (loading) {
+    return (
+      <div className="space-y-4 animate-fadeIn">
+        <div className="skeleton h-14 w-full rounded-2xl" />
+        <div className="skeleton h-64 w-full rounded-2xl" />
+      </div>
+    );
+  }
 
   const statusIcon = (s: string) => {
     if (s === 'active') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
@@ -134,43 +142,67 @@ export const UserManagement: React.FC = () => {
           </div>
         )}
 
-        <div className="divide-y divide-slate-100">
-          {users.map(user => (
-            <div key={user.id} className="flex items-center gap-4 p-4 hover:bg-slate-50 transition-colors">
-              <img src={user.avatar} alt="" className="w-8 h-8 rounded-full ring-2 ring-slate-200" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-slate-900 truncate">{user.name}</p>
-                <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
-                {user.companyName && (
-                  <p className="text-[10px] text-violet-500 truncate flex items-center gap-1 mt-0.5">
-                    <Building2 className="w-3 h-3" />
-                    {user.companyName}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">{statusIcon(user.status)}</div>
-              <select
-                value={user.status}
-                onChange={e => updateUser(user.id, { status: e.target.value })}
-                className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
-              </select>
-              <select
-                value={user.roleId ?? ''}
-                onChange={e => updateUser(user.id, { role_id: Number(e.target.value) })}
-                className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
-              >
-                <option value="" disabled>Role</option>
-                {roles.filter(r => r.id > 1).map(r => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-          ))}
-        </div>
+        <SortableTable<CrmUser>
+          rowKey={(u) => u.id}
+          columns={[
+            {
+              key: 'name', label: 'User', sortable: true,
+              sortValue: (u) => u.name,
+              render: (user) => (
+                <div className="flex items-center gap-3 min-w-0">
+                  <img src={user.avatar} alt="" className="w-8 h-8 rounded-full ring-2 ring-slate-200 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-900 truncate">{user.name}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
+                    {user.companyName && (
+                      <p className="text-[10px] text-violet-500 truncate flex items-center gap-1 mt-0.5">
+                        <Building2 className="w-3 h-3" />
+                        {user.companyName}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'status', label: 'Status', sortable: true, align: 'center',
+              sortValue: (u) => u.status,
+              render: (user) => (
+                <div className="flex items-center justify-center gap-2">
+                  {statusIcon(user.status)}
+                  <select
+                    value={user.status}
+                    onChange={(e) => updateUser(user.id, { status: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              ),
+            },
+            {
+              key: 'roleName', label: 'Role', sortable: true, align: 'center',
+              sortValue: (u) => u.roleName || '',
+              render: (user) => (
+                <select
+                  value={user.roleId ?? ''}
+                  onChange={(e) => updateUser(user.id, { role_id: Number(e.target.value) })}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                >
+                  <option value="" disabled>Role</option>
+                  {roles.filter((r) => r.id > 1).map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              ),
+            },
+          ]}
+          rows={users}
+        />
       </div>
     </div>
   );

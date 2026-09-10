@@ -1,9 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useCRM } from '../../context/CRMContext';
-import { X, DollarSign, Calendar, Target, Tag, FileText, User, Layers, Edit3, Check, Link } from 'lucide-react';
+import { usePermissions } from '../../lib/permissions';
+import { X, DollarSign, Calendar, Target, Tag, FileText, User, Layers, Edit3, Check, Link, UserCog } from 'lucide-react';
 
 export const DealDetailModal: React.FC = () => {
-  const { selectedDeal, setSelectedDeal, stages, updateDealStage, activities, tasks } = useCRM();
+  const { selectedDeal, setSelectedDeal, stages, updateDealStage, assignDeal, tenantUsers, activities, tasks } = useCRM();
+  const { roleId } = usePermissions();
+  const canReassign = roleId !== 5 && tenantUsers.length > 0;
 
   const [editing, setEditing] = useState(false);
   const [editNotes, setEditNotes] = useState('');
@@ -122,6 +125,27 @@ export const DealDetailModal: React.FC = () => {
                 <p className="text-sm font-bold text-slate-900">{selectedDeal.contactName}</p>
                 <p className="text-xs text-slate-500">{selectedDeal.contactEmail}</p>
               </div>
+            </div>
+          </div>
+
+          {/* Assigned To */}
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mb-2">
+              <UserCog className="w-3.5 h-3.5" />Assigned To
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <img src={selectedDeal.owner.avatar} alt={selectedDeal.owner.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-200" />
+              {canReassign ? (
+                <select
+                  value={selectedDeal.assignedTo || ''}
+                  onChange={(e) => assignDeal(selectedDeal.id, e.target.value)}
+                  className="text-sm font-bold text-slate-900 bg-transparent focus:outline-none cursor-pointer flex-1"
+                >
+                  {tenantUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              ) : (
+                <p className="text-sm font-bold text-slate-900">{selectedDeal.owner.name}</p>
+              )}
             </div>
           </div>
 

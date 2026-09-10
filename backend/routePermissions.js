@@ -19,6 +19,7 @@ const RULES = [
   { methods: ['GET'], pattern: /^\/api\/deals$/, permission: 'pipeline:view_deals' },
   { methods: ['POST'], pattern: /^\/api\/deals$/, permission: 'pipeline:create_edit_deal' },
   { methods: ['PATCH'], pattern: /^\/api\/deals\/[^/]+\/stage$/, permission: 'pipeline:create_edit_deal' },
+  { methods: ['PATCH'], pattern: /^\/api\/deals\/[^/]+\/assign$/, permission: 'pipeline:create_edit_deal' },
   { methods: ['DELETE'], pattern: /^\/api\/deals\/[^/]+$/, permission: 'pipeline:delete_deal' },
 
   // ── Contacts ──
@@ -28,7 +29,10 @@ const RULES = [
 
   // ── Tasks ──
   { methods: ['GET'], pattern: /^\/api\/tasks$/, permission: 'tasks:view' },
-  { methods: ['POST'], pattern: /^\/api\/tasks$/, permission: 'tasks:create_assign_others' },
+  // NOTE: creating a task assigned to yourself only needs 'tasks:view' (every role that can see tasks
+  // can manage their own) — assigning it to someone else additionally requires 'tasks:create_assign_others',
+  // checked inline in the route handler since that decision depends on the request body, not just the route.
+  { methods: ['POST'], pattern: /^\/api\/tasks$/, permission: 'tasks:view' },
   { methods: ['PATCH'], pattern: /^\/api\/tasks\/[^/]+$/, permission: 'tasks:edit_delete' },
   { methods: ['DELETE'], pattern: /^\/api\/tasks\/[^/]+$/, permission: 'tasks:edit_delete' },
 

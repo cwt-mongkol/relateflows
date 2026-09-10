@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useSettings } from '../../context/SettingsContext';
-import type { LifecycleStage } from '../../types/crm';
-import { 
-  Plus, 
-  Filter, 
-  Building2, 
+import type { Contact, LifecycleStage } from '../../types/crm';
+import { SortableTable, type SortableColumn } from '../ui/SortableTable';
+import {
+  Plus,
+  Filter,
+  Building2,
   Award,
   ChevronRight
 } from 'lucide-react';
@@ -89,118 +90,94 @@ export const ContactsView: React.FC = () => {
 
       {/* Contacts Data Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                <th className="py-3.5 px-5">{t('contacts.table.name')}</th>
-                <th className="py-3.5 px-4">{t('contacts.table.company')}</th>
-                <th className="py-3.5 px-4">{t('contacts.table.stage')}</th>
-                <th className="py-3.5 px-4">{t('contacts.table.score')}</th>
-                <th className="py-3.5 px-4">{t('contacts.table.value')}</th>
-                <th className="py-3.5 px-4">{t('contacts.table.contacted')}</th>
-                <th className="py-3.5 px-5 text-right">{t('contacts.table.actions')}</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredContacts.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
-                    {t('contacts.empty')}
-                  </td>
-                </tr>
-              ) : (
-                filteredContacts.map((contact) => (
-                  <tr
-                    key={contact.id}
-                    onClick={() => setSelectedContact(contact)}
-                    className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
-                  >
-                    {/* Contact Name & Avatar */}
-                    <td className="py-3.5 px-5">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={contact.avatar}
-                          alt={contact.name}
-                          className="w-10 h-10 rounded-xl object-cover ring-2 ring-slate-100 group-hover:ring-blue-400 transition-all"
-                        />
-                        <div>
-                          <h4 className="font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
-                            {contact.name}
-                            {contact.leadScore >= 90 && (
-                              <span title="VIP High Score">
-                                <Award className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
-                              </span>
-                            )}
-                          </h4>
-                          <p className="text-[11px] text-slate-500 font-medium">{contact.role}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Company */}
-                    <td className="py-3.5 px-4 font-semibold text-slate-800">
-                      <div className="flex items-center gap-1.5">
-                        <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{contact.company}</span>
-                      </div>
-                    </td>
-
-                    {/* Lifecycle Stage */}
-                    <td className="py-3.5 px-4">
-                      <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full border uppercase tracking-wider ${getStageBadgeClass(contact.lifecycleStage)}`}>
-                        {contact.lifecycleStage}
-                      </span>
-                    </td>
-
-                    {/* Lead Score Progress Pill */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-slate-100 rounded-full h-2 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${
-                              contact.leadScore >= 80 ? 'bg-blue-500' : 'bg-blue-500'
-                            }`}
-                            style={{ width: `${contact.leadScore}%` }}
-                          />
-                        </div>
-                        <span className={`font-extrabold text-xs ${contact.leadScore >= 80 ? 'text-yellow-600' : 'text-slate-700'}`}>
-                          {contact.leadScore}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Total Deals Value */}
-                    <td className="py-3.5 px-4 font-extrabold text-slate-900">
-                      ${contact.totalDealsValue.toLocaleString()}
-                    </td>
-
-                    {/* Last Contacted */}
-                    <td className="py-3.5 px-4 text-slate-500 font-medium text-[11px]">
-                      {contact.lastContacted}
-                    </td>
-
-                    {/* Action */}
-                    <td className="py-3.5 px-5 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedContact(contact);
-                        }}
-                        className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200"
-                      >
-                        <span>{t('contacts.viewProfile')}</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <SortableTable<Contact>
+          rowKey={(c) => c.id}
+          emptyMessage={t('contacts.empty')}
+          onRowClick={setSelectedContact}
+          columns={contactColumns(t, getStageBadgeClass, setSelectedContact)}
+          rows={filteredContacts}
+        />
       </div>
     </div>
   );
 };
+
+function contactColumns(
+  t: (key: string) => string,
+  getStageBadgeClass: (stage: LifecycleStage) => string,
+  setSelectedContact: (c: Contact) => void,
+): SortableColumn<Contact>[] {
+  return [
+    {
+      key: 'name', label: t('contacts.table.name'), sortable: true,
+      sortValue: (c) => c.name,
+      render: (contact) => (
+        <div className="flex items-center gap-3">
+          <img src={contact.avatar} alt={contact.name} className="w-10 h-10 rounded-xl object-cover ring-2 ring-slate-100" />
+          <div>
+            <h4 className="font-extrabold text-slate-900 flex items-center gap-1.5">
+              {contact.name}
+              {contact.leadScore >= 90 && (
+                <span title="VIP High Score"><Award className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" /></span>
+              )}
+            </h4>
+            <p className="text-[11px] text-slate-500 font-medium">{contact.role}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'company', label: t('contacts.table.company'), sortable: true,
+      sortValue: (c) => c.company,
+      render: (contact) => (
+        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+          <Building2 className="w-3.5 h-3.5 text-slate-400" />
+          <span>{contact.company}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'lifecycleStage', label: t('contacts.table.stage'), sortable: true,
+      sortValue: (c) => c.lifecycleStage,
+      render: (contact) => (
+        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full border uppercase tracking-wider ${getStageBadgeClass(contact.lifecycleStage)}`}>
+          {contact.lifecycleStage}
+        </span>
+      ),
+    },
+    {
+      key: 'leadScore', label: t('contacts.table.score'), sortable: true,
+      sortValue: (c) => c.leadScore,
+      render: (contact) => (
+        <div className="flex items-center gap-2">
+          <div className="w-16 bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="h-full rounded-full bg-blue-500" style={{ width: `${contact.leadScore}%` }} />
+          </div>
+          <span className={`font-extrabold text-xs ${contact.leadScore >= 80 ? 'text-yellow-600' : 'text-slate-700'}`}>{contact.leadScore}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'totalDealsValue', label: t('contacts.table.value'), sortable: true,
+      sortValue: (c) => c.totalDealsValue,
+      render: (contact) => <span className="font-extrabold text-slate-900">${contact.totalDealsValue.toLocaleString()}</span>,
+    },
+    {
+      key: 'lastContacted', label: t('contacts.table.contacted'), sortable: true,
+      sortValue: (c) => c.lastContacted,
+      render: (contact) => <span className="text-slate-500 font-medium text-[11px]">{contact.lastContacted}</span>,
+    },
+    {
+      key: 'actions', label: t('contacts.table.actions'), align: 'right',
+      render: (contact) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); setSelectedContact(contact); }}
+          className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200"
+        >
+          <span>{t('contacts.viewProfile')}</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      ),
+    },
+  ];
+}

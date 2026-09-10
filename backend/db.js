@@ -767,6 +767,26 @@ async function applyMigrations(currentVersion) {
     await pool.query('INSERT INTO schema_versions (version) VALUES (14)');
     console.log('Schema version 14 applied.');
   }
+
+  if (currentVersion < 15) {
+    console.log('Applying schema version 15 (assignable deals/tasks for role-scoped visibility)...');
+    const v15Statements = [
+      `ALTER TABLE deals ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL`,
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_deals_assigned ON deals(assigned_to)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)`,
+    ];
+    for (const stmt of v15Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v15 migration warning:', err.message);
+      }
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (15)');
+    console.log('Schema version 15 applied.');
+  }
 }
 
 export async function initDb() {

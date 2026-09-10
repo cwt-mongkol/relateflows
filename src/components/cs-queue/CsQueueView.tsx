@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Chart from 'react-apexcharts';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { useSettings } from '../../context/SettingsContext';
 import { usePermissions } from '../../lib/permissions';
+import type { CsPerformanceGranularity, CsShiftPerformanceRow, CsBucketPerformanceRow } from '../../types/crm';
+import { SortableTable } from '../ui/SortableTable';
 import {
   Headphones, MessageCircle, Users, Loader2, Send,
   X, AlertCircle, User, Filter, RefreshCw,
@@ -70,12 +73,22 @@ const CHANNEL_ICONS: Record<string, string> = {
 export const CsQueueView: React.FC = () => {
   const { user } = useAuth();
   const { t } = useSettings();
-  const { roleName } = usePermissions();
+  const { roleName, roleId } = usePermissions();
+  const isSupervisor = roleId === 1 || roleId === 2 || roleId === 4;
 
   const [queue, setQueue] = useState<CsSession[]>([]);
   const [myChats, setMyChats] = useState<CsSession[]>([]);
   const [teamStatus, setTeamStatus] = useState<TeamMember[]>([]);
   const [performance, setPerformance] = useState<any[]>([]);
+
+  // Response-time breakdown (shift / day / week / month / custom) for one agent — self by default,
+  // or a chosen teammate when the viewer is a supervisor.
+  const [rtGranularity, setRtGranularity] = useState<CsPerformanceGranularity>('day');
+  const [rtUserId, setRtUserId] = useState<string>('');
+  const [rtFrom, setRtFrom] = useState<string>('');
+  const [rtTo, setRtTo] = useState<string>('');
+  const [rtRows, setRtRows] = useState<(CsShiftPerformanceRow | CsBucketPerformanceRow)[]>([]);
+  const [rtLoading, setRtLoading] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'queue' | 'my-chats' | 'team' | 'performance'>('queue');
@@ -125,6 +138,21 @@ export const CsQueueView: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [activeTab]);
+
+  // Fetch the flexible response-time breakdown whenever the performance tab is open and the
+  // granularity/agent/date-range selection changes.
+  useEffect(() => {
+    if (activeTab !== 'performance') return;
+    if (rtGranularity === 'custom' && (!rtFrom || !rtTo)) return;
+    setRtLoading(true);
+    const params = new URLSearchParams({ granularity: rtGranularity });
+    if (rtUserId) params.set('userId', rtUserId);
+    if (rtGranularity === 'custom') { params.set('from', rtFrom); params.set('to', rtTo); }
+    api.get<(CsShiftPerformanceRow | CsBucketPerformanceRow)[]>(`/api/cs-admin/performance?${params.toString()}`)
+      .then(setRtRows)
+      .catch(() => setRtRows([]))
+      .finally(() => setRtLoading(false));
+  }, [activeTab, rtGranularity, rtUserId, rtFrom, rtTo]);
 
   const handleClaim = async (sessionId: string) => {
     setClaiming(sessionId);
@@ -180,8 +208,10 @@ export const CsQueueView: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+      <div className="space-y-5 animate-fadeIn">
+        <div className="skeleton h-32 w-full rounded-2xl" />
+        <div className="skeleton h-12 w-full rounded-2xl" />
+        <div className="skeleton h-96 w-full rounded-2xl" />
       </div>
     );
   }
@@ -493,52 +523,116 @@ export const CsQueueView: React.FC = () => {
 
       {/* Performance tab */}
       {activeTab === 'performance' && (
+        <>
+        {/* Response-time breakdown — own shift by default, flexible granularity */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h4 className="text-sm font-extrabold text-slate-900">Response Time</h4>
+            <div className="flex items-center gap-2 flex-wrap">
+              {isSupervisor && (
+                <select
+                  value={rtUserId}
+                  onChange={(e) => setRtUserId(e.target.value)}
+                  className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer"
+                >
+                  <option value="">Myself</option>
+                  {teamStatus.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              )}
+              <div className="bg-slate-100 rounded-xl p-1 flex items-center gap-0.5">
+                {(['shift', 'day', 'week', 'month', 'custom'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setRtGranularity(g)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize transition-all ${
+                      rtGranularity === g ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+              {rtGranularity === 'custom' && (
+                <div className="flex items-center gap-1.5">
+                  <input type="date" value={rtFrom} onChange={(e) => setRtFrom(e.target.value)} className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none" />
+                  <span className="text-slate-400 text-xs">–</span>
+                  <input type="date" value={rtTo} onChange={(e) => setRtTo(e.target.value)} className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {rtLoading ? (
+            <div className="skeleton h-64 w-full rounded-xl" />
+          ) : rtRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+              <ClockIcon className="w-8 h-8 mb-2 opacity-50" />
+              <p className="text-xs font-bold">No data for this range yet.</p>
+            </div>
+          ) : (
+            <Chart
+              type="bar"
+              height={260}
+              options={{
+                chart: { toolbar: { show: false }, fontFamily: 'inherit' },
+                plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
+                dataLabels: { enabled: false },
+                xaxis: {
+                  categories: rtRows.map((r) =>
+                    'shiftId' in r
+                      ? new Date(r.clockIn).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : new Date(r.bucket).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                  ),
+                  labels: { style: { fontSize: '10px' } },
+                },
+                yaxis: { title: { text: 'Avg response (min)', style: { fontSize: '11px' } } },
+                colors: ['#2563EB'],
+                grid: { borderColor: '#f1f5f9' },
+                tooltip: { y: { formatter: (v: number) => `${v} min` } },
+              }}
+              series={[{ name: 'Avg response time', data: rtRows.map((r) => r.avgResponseMinutes ?? 0) }]}
+            />
+          )}
+        </div>
+
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-100">
             <h4 className="text-sm font-extrabold text-slate-900">{t('csQueue.performance')}</h4>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 font-bold">
-                  <th className="text-left px-5 py-3">{t('csQueue.table.agent')}</th>
-                  <th className="text-center px-3 py-3">{t('csQueue.table.totalChats')}</th>
-                  <th className="text-center px-3 py-3">{t('csQueue.table.responded')}</th>
-                  <th className="text-center px-3 py-3">{t('csQueue.table.avgResponse')}</th>
-                  <th className="text-center px-3 py-3">{t('csQueue.table.closed')}</th>
-                  <th className="text-center px-3 py-3">{t('csQueue.table.hoursSpent')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {performance.map((p: any) => (
-                  <tr key={p.assigned_to} className="hover:bg-slate-50">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[9px] font-bold">
-                          {p.user_name?.charAt(0) || '?'}
-                        </div>
-                        <span className="font-bold text-slate-800">{p.user_name || t('csQueue.unknown')}</span>
-                      </div>
-                    </td>
-                    <td className="text-center px-3 py-3 font-bold text-slate-800">{p.total_chats}</td>
-                    <td className="text-center px-3 py-3">{p.responded_chats}</td>
-                    <td className="text-center px-3 py-3">
-                      <span className="font-bold text-blue-600">{t('csQueue.min').replace('{count}', p.avg_response_minutes || '-')}</span>
-                    </td>
-                    <td className="text-center px-3 py-3">{p.closed_chats}</td>
-                    <td className="text-center px-3 py-3">{t('csQueue.hrs').replace('{count}', p.total_hours_spent || '0')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {performance.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                <TrendingUp className="w-8 h-8 mb-2 opacity-50" />
-                <p className="text-xs font-bold">{t('csQueue.noPerformance')}</p>
-              </div>
-            )}
-          </div>
+          <SortableTable<any>
+            rowKey={(p) => p.assigned_to}
+            emptyMessage={t('csQueue.noPerformance')}
+            columns={[
+              {
+                key: 'user_name', label: t('csQueue.table.agent'), sortable: true,
+                sortValue: (p) => p.user_name || '',
+                render: (p) => (
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[9px] font-bold">
+                      {p.user_name?.charAt(0) || '?'}
+                    </div>
+                    <span className="font-bold text-slate-800">{p.user_name || t('csQueue.unknown')}</span>
+                  </div>
+                ),
+              },
+              { key: 'total_chats', label: t('csQueue.table.totalChats'), sortable: true, align: 'center', sortValue: (p) => p.total_chats, render: (p) => <span className="font-bold text-slate-800">{p.total_chats}</span> },
+              { key: 'responded_chats', label: t('csQueue.table.responded'), sortable: true, align: 'center', sortValue: (p) => p.responded_chats },
+              {
+                key: 'avg_response_minutes', label: t('csQueue.table.avgResponse'), sortable: true, align: 'center',
+                sortValue: (p) => p.avg_response_minutes ?? 0,
+                render: (p) => <span className="font-bold text-blue-600">{t('csQueue.min').replace('{count}', p.avg_response_minutes || '-')}</span>,
+              },
+              { key: 'closed_chats', label: t('csQueue.table.closed'), sortable: true, align: 'center', sortValue: (p) => p.closed_chats },
+              {
+                key: 'total_hours_spent', label: t('csQueue.table.hoursSpent'), sortable: true, align: 'center',
+                sortValue: (p) => p.total_hours_spent ?? 0,
+                render: (p) => t('csQueue.hrs').replace('{count}', p.total_hours_spent || '0'),
+              },
+            ]}
+            rows={performance}
+          />
         </div>
+        </>
       )}
     </div>
   );

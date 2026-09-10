@@ -30,6 +30,7 @@ import type {
   WebhookSubscription,
   WebhookDelivery,
   ApiKey,
+  CrmUser,
 } from '../types/crm';
 import { 
   INITIAL_DEALS, 
@@ -79,7 +80,9 @@ interface CRMContextType {
   // Actions
   addDeal: (deal: Omit<Deal, 'id' | 'createdAt'>) => Promise<void>;
   updateDealStage: (dealId: string, newStage: DealStage) => Promise<void>;
+  assignDeal: (dealId: string, userId: string) => Promise<void>;
   deleteDeal: (dealId: string) => Promise<void>;
+  tenantUsers: CrmUser[];
   
   addContact: (contact: Omit<Contact, 'id' | 'lastContacted' | 'totalDealsValue'>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
@@ -159,6 +162,13 @@ interface CRMContextType {
   clearNotifications: () => Promise<void>;
 }
 
+// Moves a record to the front of its list — used after edits/reassignments so a changed or
+// newly-transferred-in row surfaces at the top the same way a freshly created one already does
+// (creates already prepend directly; this keeps edits/assignments consistent with that).
+function moveToFront<T>(list: T[], id: string, updated: T, getId: (item: T) => string): T[] {
+  return [updated, ...list.filter((item) => getId(item) !== id)];
+}
+
 const CRMContext = createContext<CRMContextType | undefined>(undefined);
 
 export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -194,6 +204,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leadScoringRules, setLeadScoringRules] = useState<LeadScoringRule[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookSubscription[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  // Tenant user directory for "assign to" pickers — only populated for roles that already have
+  // settings_user_management:view_add_edit_deactivate_user (Manager and up); a Sales Rep's fetch 403s
+  // and is swallowed, leaving this empty (they only ever assign to themselves).
+  const [tenantUsers, setTenantUsers] = useState<CrmUser[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [isAddDealModalOpen, setIsAddDealModalOpen] = useState(false);
@@ -207,7 +221,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
 
-        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData, channelsData, pipelinesData, leadScoringData, webhooksData, apiKeysData] = await Promise.all([
+        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData, channelsData, pipelinesData, leadScoringData, webhooksData, apiKeysData, usersData] = await Promise.all([
           api.get<Deal[]>('/api/deals').catch(() => null),
           api.get<Contact[]>('/api/contacts').catch(() => null),
           api.get<CompanyAccount[]>('/api/companies').catch(() => null),
@@ -228,13 +242,15 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           api.get<LeadScoringRule[]>('/api/lead-scoring-rules').catch(() => null),
           api.get<WebhookSubscription[]>('/api/webhooks').catch(() => null),
           api.get<ApiKey[]>('/api/api-keys').catch(() => null),
+          api.get<CrmUser[]>('/api/users').catch(() => null),
         ]) as [
           Deal[] | null, Contact[] | null, CompanyAccount[] | null, Activity[] | null,
           WorkflowRule[] | null, MetricCardData[] | null, PipelineStage[] | null,
           Lead[] | null, ChatMessage[] | null, Product[] | null, Category[] | null,
           Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null,
           { id: number; type: string; displayName: string; status: string }[] | null,
-          Pipeline[] | null, LeadScoringRule[] | null, WebhookSubscription[] | null, ApiKey[] | null
+          Pipeline[] | null, LeadScoringRule[] | null, WebhookSubscription[] | null, ApiKey[] | null,
+          CrmUser[] | null
         ];
 
         // Use API data if available and non-empty, otherwise fall back to mock data
@@ -270,6 +286,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setLeadScoringRules(leadScoringData || []);
         setWebhooks(webhooksData || []);
         setApiKeys(apiKeysData || []);
+        setTenantUsers(usersData || []);
       } catch (err) {
         console.warn('Failed to load data, using mock data:', err);
       }
@@ -362,7 +379,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     try {
       const updatedDeal = await api.patch<any>(`/api/deals/${dealId}/stage`, { stage: newStage, probability: newProbability });
-      setDeals((prev) => prev.map((d) => d.id === dealId ? updatedDeal : d));
+      setDeals((prev) => moveToFront(prev, dealId, updatedDeal, (d) => d.id));
 
       // Create activity
       const newActData = {
@@ -428,6 +445,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Local Fallback
     setDeals((prev) => prev.filter((d) => d.id !== dealId));
+  };
+
+  const assignDeal = async (dealId: string, userId: string) => {
+    const updated = await api.patch<Deal>(`/api/deals/${dealId}/assign`, { assignedTo: userId });
+    setDeals((prev) => moveToFront(prev, dealId, updated, (d) => d.id));
   };
 
   const addContact = async (newContactData: Omit<Contact, 'id' | 'lastContacted' | 'totalDealsValue'>) => {
@@ -803,7 +825,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateTask = async (id: string, data: Partial<Task>) => {
     try {
       const updated = await api.patch<Task>(`/api/tasks/${id}`, data);
-      setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
+      setTasks((prev) => moveToFront(prev, id, updated, (t) => t.id));
       return;
     } catch (err) {
       console.warn('API failed for updateTask, falling back.', err);
@@ -993,7 +1015,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsAddWorkflowModalOpen,
         addDeal,
         updateDealStage,
+        assignDeal,
         deleteDeal,
+        tenantUsers,
         addContact,
         deleteContact,
         toggleWorkflowStatus,

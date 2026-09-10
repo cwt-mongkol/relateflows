@@ -5,6 +5,7 @@
 // "move deal stage" action would otherwise be able to re-trigger a "deal.stage_changed" workflow).
 import pool from './db.js';
 import { evaluateConditions } from './conditions.js';
+import { getUserBrief } from './userBrief.js';
 
 const VALID_TRIGGER_TYPES = [
   'lead.created',
@@ -18,17 +19,6 @@ const VALID_TRIGGER_TYPES = [
 ];
 
 const VALID_ACTION_TYPES = ['create_task', 'send_notification', 'assign_lead', 'add_tag', 'move_deal_stage'];
-
-async function getUserBrief(userId) {
-  if (!userId) return { name: 'Unassigned', avatar: '' };
-  try {
-    const res = await pool.query('SELECT name, avatar FROM users WHERE id = $1', [userId]);
-    if (res.rows.length === 0) return { name: 'Unassigned', avatar: '' };
-    return { name: res.rows[0].name, avatar: res.rows[0].avatar || '' };
-  } catch {
-    return { name: 'Unassigned', avatar: '' };
-  }
-}
 
 async function actionCreateTask(tenantId, entityType, entityId, payload, params) {
   const { title, dueInDays, priority, assigneeUserId } = params || {};

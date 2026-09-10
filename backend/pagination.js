@@ -39,7 +39,10 @@ export function keysetPaginate(baseQuery, baseParams, queryParams = {}, opts = {
         const p1 = baseParams.length + 1;
         const p2 = baseParams.length + 2;
         const op = orderDir.toUpperCase() === 'DESC' ? '<' : '>';
-        cursorClause = ` WHERE (${orderBy}, ${tieBreaker}) ${op} ($${p1}, $${p2})`;
+        // baseQuery may already carry its own WHERE (e.g. role-scoped visibility filters) — continue
+        // with AND in that case instead of emitting a second WHERE, which would be invalid SQL.
+        const keyword = /\bWHERE\b/i.test(baseQuery) ? 'AND' : 'WHERE';
+        cursorClause = ` ${keyword} (${orderBy}, ${tieBreaker}) ${op} ($${p1}, $${p2})`;
       }
     } catch {
       // invalid cursor — treat as first page

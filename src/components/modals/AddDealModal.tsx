@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useCRM } from '../../context/CRMContext';
+import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../lib/permissions';
 import type { Priority } from '../../types/crm';
 import { X, TrendingUp, Plus } from 'lucide-react';
 
 export const AddDealModal: React.FC = () => {
-  const { isAddDealModalOpen, setIsAddDealModalOpen, addDeal, stages, selectedPipelineId } = useCRM();
+  const { isAddDealModalOpen, setIsAddDealModalOpen, addDeal, stages, selectedPipelineId, tenantUsers } = useCRM();
+  const { user } = useAuth();
+  const { roleId } = usePermissions();
+  const canAssignOthers = roleId !== 5 && tenantUsers.length > 0;
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -17,6 +22,12 @@ export const AddDealModal: React.FC = () => {
   const [contactEmail] = useState('');
   const [leadSource, setLeadSource] = useState('Inbound Website');
   const [notes, setNotes] = useState('');
+  const [assignedTo, setAssignedTo] = useState(user?.id || '');
+
+  useEffect(() => {
+    if (isAddDealModalOpen && !assignedTo && user?.id) setAssignedTo(user.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAddDealModalOpen, user?.id]);
 
   const openStages = stages.filter((s) => s.pipelineId === selectedPipelineId && !s.isClosedWon && !s.isClosedLost);
 
@@ -36,6 +47,7 @@ export const AddDealModal: React.FC = () => {
     if (!title || !company || !contactName || isSubmitting) return;
 
     setIsSubmitting(true);
+    const assignee = tenantUsers.find((u) => u.id === assignedTo);
     await addDeal({
       title,
       company,
@@ -44,9 +56,10 @@ export const AddDealModal: React.FC = () => {
       pipelineId: selectedPipelineId,
       probability: Number(probability),
       owner: {
-        name: 'Sarah Connor',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+        name: assignee?.name || user?.name || 'Unassigned',
+        avatar: assignee?.avatar || user?.avatar || '',
       },
+      assignedTo: assignedTo || user?.id,
       leadSource,
       priority,
       contactName,
@@ -151,6 +164,22 @@ export const AddDealModal: React.FC = () => {
                 <option value="low">💤 Low Priority</option>
               </select>
             </div>
+
+            {canAssignOthers && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Assign To</label>
+                <select
+                  value={assignedTo}
+                  onChange={(e) => setAssignedTo(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-800 transition-all shadow-xs cursor-pointer"
+                >
+                  {user?.id && <option value={user.id}>Myself ({user.name})</option>}
+                  {tenantUsers.filter((u) => u.id !== user?.id).map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">

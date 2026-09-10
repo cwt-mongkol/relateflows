@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useSettings } from '../../context/SettingsContext';
+import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../lib/permissions';
 import { Plus, Filter, Search, CheckCircle2, Circle, Clock, Calendar, Trash2 } from 'lucide-react';
 import type { Task } from '../../types/crm';
 
@@ -17,12 +19,15 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 };
 
 export const TasksView: React.FC = () => {
-  const { tasks, addTask, updateTask, deleteTask } = useCRM();
+  const { isLoading, tasks, addTask, updateTask, deleteTask, tenantUsers } = useCRM();
   const { t } = useSettings();
+  const { user } = useAuth();
+  const { roleId } = usePermissions();
+  const canAssignOthers = roleId !== 5 && tenantUsers.length > 0;
   const [filter, setFilter] = useState<'all' | 'todo' | 'in_progress' | 'done'>('all');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' as Task['priority'], status: 'todo' as Task['status'], dueDate: '', assigneeName: '' });
+  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' as Task['priority'], status: 'todo' as Task['status'], dueDate: '', assignedTo: user?.id || '' });
 
   const filtered = tasks.filter((t) => {
     if (filter !== 'all' && t.status !== filter) return false;
@@ -32,15 +37,17 @@ export const TasksView: React.FC = () => {
 
   const handleCreate = () => {
     if (!form.title.trim()) return;
+    const assignee = tenantUsers.find((u) => u.id === form.assignedTo);
     addTask({
       title: form.title,
       description: form.description,
       priority: form.priority,
       status: form.status,
       dueDate: form.dueDate || new Date().toISOString().split('T')[0],
-      assignee: { name: form.assigneeName || t('tasks.me'), avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80' },
+      assignee: { name: assignee?.name || user?.name || t('tasks.me'), avatar: assignee?.avatar || user?.avatar || '' },
+      assignedTo: form.assignedTo || user?.id,
     });
-    setForm({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', assigneeName: '' });
+    setForm({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', assignedTo: user?.id || '' });
     setShowForm(false);
   };
 
@@ -51,6 +58,17 @@ export const TasksView: React.FC = () => {
       tasks: filtered.filter((t) => t.status === status),
     }));
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        <div className="skeleton h-24 w-full rounded-2xl" />
+        <div className="flex gap-5 overflow-x-auto pb-4">
+          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-96 min-w-[300px] w-[300px] rounded-2xl shrink-0" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -158,7 +176,17 @@ export const TasksView: React.FC = () => {
                   <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none" />
                 </div>
               </div>
-              <input value={form.assigneeName} onChange={(e) => setForm({ ...form, assigneeName: e.target.value })} placeholder={t('tasks.modal.assignee')} className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-blue-400" />
+              {canAssignOthers ? (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">{t('tasks.modal.assignee')}</label>
+                  <select value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })} className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none">
+                    {user?.id && <option value={user.id}>{t('tasks.me')}</option>}
+                    {tenantUsers.filter((u) => u.id !== user?.id).map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setShowForm(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs px-4 py-2.5 rounded-xl transition-all">{t('tasks.modal.cancel')}</button>
                 <button onClick={handleCreate} disabled={!form.title.trim()} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all">{t('tasks.modal.create')}</button>

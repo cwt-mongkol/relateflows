@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { useSettings } from '../../context/SettingsContext';
+import { usePermissions } from '../../lib/permissions';
 import Chart from 'react-apexcharts';
 import type { DealStage } from '../../types/crm';
-import { Plus, Filter, Building2, GripVertical, LayoutPanelTop, GanttChartSquare, CalendarDays, CalendarRange, ZoomIn, ZoomOut } from 'lucide-react';
+import { Plus, Filter, Building2, GripVertical, LayoutPanelTop, GanttChartSquare, CalendarDays, CalendarRange, ZoomIn, ZoomOut, Users } from 'lucide-react';
 
 type ZoomLevel = 'day' | 'week' | 'month' | 'year' | 'all';
 
@@ -30,9 +31,14 @@ const BADGE_COLORS: Record<string, string> = {
 };
 
 export const PipelineView: React.FC = () => {
-  const { isLoading, deals, stages, pipelines, selectedPipelineId, setSelectedPipelineId, updateDealStage, deleteDeal, setIsAddDealModalOpen, setSelectedDeal, searchQuery } = useCRM();
+  const { isLoading, deals, stages, pipelines, selectedPipelineId, setSelectedPipelineId, updateDealStage, deleteDeal, setIsAddDealModalOpen, setSelectedDeal, searchQuery, tenantUsers } = useCRM();
   const { t } = useSettings();
+  const { roleId } = usePermissions();
+  // Sales Reps already only ever receive their own deals from the API — the filter is for Manager and
+  // up, who see everyone's and want to narrow down to "what has rep X gotten to."
+  const canFilterBySalesperson = roleId !== 5 && tenantUsers.length > 0;
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [salespersonFilter, setSalespersonFilter] = useState<string>('all');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'gantt'>('kanban');
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month');
@@ -42,6 +48,7 @@ export const PipelineView: React.FC = () => {
   const filteredDeals = deals.filter((deal) => {
     if (deal.pipelineId !== selectedPipelineId) return false;
     if (priorityFilter !== 'all' && deal.priority !== priorityFilter) return false;
+    if (salespersonFilter !== 'all' && deal.assignedTo !== salespersonFilter) return false;
     if (searchQuery && !deal.title.toLowerCase().includes(searchQuery.toLowerCase()) && !deal.company.toLowerCase().includes(searchQuery.toLowerCase()) && !(deal.contactName || '').toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
@@ -292,6 +299,21 @@ export const PipelineView: React.FC = () => {
               <option value="low">{t('pipeline.filter.low')}</option>
             </select>
           </div>
+
+          {/* Salesperson Filter — Manager and up only, since Sales Reps only ever see their own deals */}
+          {canFilterBySalesperson && (
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium">
+              <Users className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={salespersonFilter}
+                onChange={(e) => setSalespersonFilter(e.target.value)}
+                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Salespeople</option>
+                {tenantUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={() => setIsAddDealModalOpen(true)}

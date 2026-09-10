@@ -54,7 +54,14 @@ export const RoleManagement: React.FC = () => {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <div className="text-sm text-slate-500 p-6">Loading roles...</div>;
+  if (loading) {
+    return (
+      <div className="space-y-4 animate-fadeIn">
+        <div className="skeleton h-14 w-full rounded-2xl" />
+        <div className="skeleton h-96 w-full rounded-2xl" />
+      </div>
+    );
+  }
 
   const permsByModule: Record<string, Permission[]> = {};
   allPermissions.forEach(p => {

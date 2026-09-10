@@ -940,5 +940,13 @@ ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON api_keys;
 CREATE POLICY tenant_isolation ON api_keys FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
 
+-- ===== Assignable deals/tasks for role-scoped visibility (Sales Rep sees only their own) =====
+-- NOTE: documents the target schema for a fresh install — db.js's schema version 15 applies this to
+-- an already-deployed database.
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_deals_assigned ON deals(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
+
 
 

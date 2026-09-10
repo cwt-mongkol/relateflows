@@ -61,6 +61,10 @@ const SCHEMAS = [
     title: { required: true, type: 'string', maxLength: 200 },
     company: { required: true, type: 'string', maxLength: 200 },
     value: { type: 'number', min: 0 },
+    assignedTo: { type: 'string', maxLength: 50 },
+  }],
+  [/^PATCH \/api\/deals\/[^/]+\/assign$/, {
+    assignedTo: { required: true, type: 'string', maxLength: 50 },
   }],
 
   // ── Contacts ──
@@ -92,11 +96,13 @@ const SCHEMAS = [
   [/^POST \/api\/tasks$/, {
     title: { required: true, type: 'string', maxLength: 200 },
     description: { type: 'string', maxLength: 2000 },
+    assignedTo: { type: 'string', maxLength: 50 },
   }],
   [/^PATCH \/api\/tasks\/[^/]+$/, {
     title: { type: 'string', maxLength: 200 },
     description: { type: 'string', maxLength: 2000 },
     status: { type: 'string', oneOf: ['todo', 'in_progress', 'done'] },
+    assignedTo: { type: 'string', maxLength: 50 },
   }],
 
   // ── Tags ──

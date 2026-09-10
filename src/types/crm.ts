@@ -31,6 +31,7 @@ export interface Deal {
     name: string;
     avatar: string;
   };
+  assignedTo?: string;
   leadSource: string;
   priority: Priority;
   contactName: string;
@@ -200,6 +201,26 @@ export interface ApiKey {
   key?: string; // only present once, in the create response
 }
 
+export type CsPerformanceGranularity = 'shift' | 'day' | 'week' | 'month' | 'custom';
+
+export interface CsShiftPerformanceRow {
+  shiftId: string;
+  clockIn: string;
+  clockOut: string | null;
+  totalChats: number;
+  respondedChats: number;
+  avgResponseMinutes: number | null;
+  closedChats: number;
+}
+
+export interface CsBucketPerformanceRow {
+  bucket: string;
+  totalChats: number;
+  respondedChats: number;
+  avgResponseMinutes: number | null;
+  closedChats: number;
+}
+
 export interface Category {
   id: number;
   name: string;
@@ -352,6 +373,7 @@ export interface Task {
   status: 'todo' | 'in_progress' | 'done';
   dueDate: string;
   assignee: { name: string; avatar: string; };
+  assignedTo?: string;
   relatedTo?: { type: 'deal' | 'contact'; id: string; label: string; };
   createdAt: string;
 }

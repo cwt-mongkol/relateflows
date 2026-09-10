@@ -18,6 +18,7 @@ import { applyLeadScoring } from './leadScoring.js';
 import { dispatchWebhooks, retryDelivery } from './webhooks.js';
 import { encrypt, decrypt } from './crypto.js';
 import { createApiV1Router } from './apiV1.js';
+import { getUserBrief } from './userBrief.js';
 
 dotenv.config();
 
@@ -1293,19 +1294,22 @@ app.delete('/api/calendar/disconnect', async (req, res) => {
 app.get('/api/deals', async (req, res) => {
   try {
     const isSA = req.user.role_id === 1;
+    // Sales Rep (role_id 5) only sees deals assigned to them — everyone else (Manager and up, CS Admin)
+    // sees the whole tenant's pipeline, which is what makes Manager the de facto "Senior" view.
+    const isSalesRep = req.user.role_id === 5;
+    const ownColumns = `d.id, d.title, d.company, d.value, d.stage, d.pipeline_id AS "pipelineId", d.probability, d.owner,
+               d.assigned_to AS "assignedTo",
+               d.lead_source AS "leadSource", d.priority, d.contact_name AS "contactName",
+               d.contact_email AS "contactEmail", d.created_at AS "createdAt",
+               d.expected_close_date AS "expectedCloseDate", d.notes, d.tags`;
+    const baseParams = isSalesRep ? [req.user.sub] : [];
+    const scopeClause = isSalesRep ? ' WHERE d.assigned_to = $1' : '';
     const baseQuery = isSA
-      ? `SELECT d.id, d.title, d.company, d.value, d.stage, d.pipeline_id AS "pipelineId", d.probability, d.owner,
-               d.lead_source AS "leadSource", d.priority, d.contact_name AS "contactName",
-               d.contact_email AS "contactEmail", d.created_at AS "createdAt",
-               d.expected_close_date AS "expectedCloseDate", d.notes, d.tags,
-               d.tenant_id AS "tenantId", tc.name AS "companyName"
-        FROM deals d LEFT JOIN tenant_companies tc ON d.tenant_id = tc.id`
-      : `SELECT d.id, d.title, d.company, d.value, d.stage, d.pipeline_id AS "pipelineId", d.probability, d.owner,
-               d.lead_source AS "leadSource", d.priority, d.contact_name AS "contactName",
-               d.contact_email AS "contactEmail", d.created_at AS "createdAt",
-               d.expected_close_date AS "expectedCloseDate", d.notes, d.tags
-        FROM deals d`;
-    const { text, params, limit } = keysetPaginate(baseQuery, [], req.query, {
+      ? `SELECT ${ownColumns}, d.tenant_id AS "tenantId", tc.name AS "companyName"
+        FROM deals d LEFT JOIN tenant_companies tc ON d.tenant_id = tc.id${scopeClause}`
+      : `SELECT ${ownColumns}
+        FROM deals d${scopeClause}`;
+    const { text, params, limit } = keysetPaginate(baseQuery, baseParams, req.query, {
       orderBy: 'd.created_at', tieBreaker: 'd.id', orderDir: 'DESC',
     });
     const result = await pool.query(text, params);
@@ -1324,12 +1328,15 @@ app.post('/api/deals', async (req, res) => {
   try {
     const {
       title, company, value, stage, probability, owner,
-      leadSource, priority, contactName, contactEmail, notes, tags, expectedCloseDate, pipelineId,
+      leadSource, priority, contactName, contactEmail, notes, tags, expectedCloseDate, pipelineId, assignedTo,
     } = req.body;
 
     const id = `DEAL-${Math.floor(100 + Math.random() * 900)}`;
     const createdAt = new Date().toISOString().split('T')[0];
     const tenantId = req.tenantId || req.user?.tenant_id || '';
+    // Defaults to the creator — a Sales Rep creating their own deal doesn't need to pick an assignee.
+    const targetAssignee = assignedTo || req.user.sub;
+    const ownerSnapshot = owner || await getUserBrief(targetAssignee);
 
     // Default to the tenant's default pipeline when not specified; validate the stage belongs to it.
     let targetPipelineId = pipelineId;
@@ -1348,15 +1355,15 @@ app.post('/api/deals', async (req, res) => {
     }
 
     const query = `
-      INSERT INTO deals (id, title, company, value, stage, pipeline_id, probability, owner, lead_source, priority, contact_name, contact_email, created_at, expected_close_date, notes, tags, tenant_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
+      INSERT INTO deals (id, title, company, value, stage, pipeline_id, probability, owner, lead_source, priority, contact_name, contact_email, created_at, expected_close_date, notes, tags, tenant_id, assigned_to)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, assigned_to AS "assignedTo", lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
     `;
 
     const result = await pool.query(query, [
       id, title, company, parseInt(value || 0, 10), stage, targetPipelineId, parseInt(probability || 0, 10),
-      JSON.stringify(owner || {}), leadSource, priority, contactName, contactEmail,
-      createdAt, expectedCloseDate || '', notes, JSON.stringify(tags || []), tenantId
+      JSON.stringify(ownerSnapshot), leadSource, priority, contactName, contactEmail,
+      createdAt, expectedCloseDate || '', notes, JSON.stringify(tags || []), tenantId, targetAssignee
     ]);
 
     const savedDeal = result.rows[0];
@@ -1402,7 +1409,7 @@ app.patch('/api/deals/:id/stage', async (req, res) => {
       UPDATE deals
       SET stage = $1, probability = $2
       WHERE id = $3
-      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
+      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, assigned_to AS "assignedTo", lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
     `;
 
     const result = await pool.query(query, [stage, parseInt(probability, 10), id]);
@@ -1424,6 +1431,36 @@ app.patch('/api/deals/:id/stage', async (req, res) => {
   } catch (err) {
     console.error('Error updating deal stage:', err);
     res.status(500).json({ error: 'Server error updating deal stage' });
+  }
+});
+
+app.patch('/api/deals/:id/assign', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assignedTo } = req.body;
+    if (!assignedTo) return res.status(400).json({ error: 'assignedTo is required' });
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const ownerSnapshot = await getUserBrief(assignedTo);
+    const result = await pool.query(
+      `UPDATE deals SET assigned_to = $1, owner = $2 WHERE id = $3
+       RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, assigned_to AS "assignedTo", lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags`,
+      [assignedTo, JSON.stringify(ownerSnapshot), id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Deal not found' });
+    const savedDeal = result.rows[0];
+    await logActivity(tenantId, {
+      type: 'stage_change',
+      title: 'Deal Reassigned',
+      description: `"${savedDeal.title}" assigned to ${ownerSnapshot.name}.`,
+      user: ownerSnapshot,
+      targetName: savedDeal.company,
+      entityType: 'deal',
+      entityId: id,
+    });
+    res.json(savedDeal);
+  } catch (err) {
+    console.error('Error assigning deal:', err);
+    res.status(500).json({ error: 'Server error assigning deal' });
   }
 });
 
@@ -1998,16 +2035,19 @@ app.patch('/api/notifications/read-all', async (req, res) => {
 app.get('/api/tasks', async (req, res) => {
   try {
     const isSA = req.user.role_id === 1;
+    const isSalesRep = req.user.role_id === 5;
+    const scopeClause = isSalesRep ? ' WHERE t.assigned_to = $1' : '';
+    const scopeParams = isSalesRep ? [req.user.sub] : [];
     const result = await pool.query(isSA ? `
       SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date AS "dueDate",
-             t.assignee, t.related_to AS "relatedTo", t.created_at AS "createdAt",
+             t.assignee, t.assigned_to AS "assignedTo", t.related_to AS "relatedTo", t.created_at AS "createdAt",
              t.tenant_id AS "tenantId", tc.name AS "companyName"
-      FROM tasks t LEFT JOIN tenant_companies tc ON t.tenant_id = tc.id ORDER BY t.created_at DESC
+      FROM tasks t LEFT JOIN tenant_companies tc ON t.tenant_id = tc.id${scopeClause} ORDER BY t.created_at DESC
     ` : `
       SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date AS "dueDate",
-             t.assignee, t.related_to AS "relatedTo", t.created_at AS "createdAt"
-      FROM tasks t ORDER BY t.created_at DESC
-    `);
+             t.assignee, t.assigned_to AS "assignedTo", t.related_to AS "relatedTo", t.created_at AS "createdAt"
+      FROM tasks t${scopeClause} ORDER BY t.created_at DESC
+    `, scopeParams);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching tasks:', err);
@@ -2017,14 +2057,22 @@ app.get('/api/tasks', async (req, res) => {
 
 app.post('/api/tasks', async (req, res) => {
   try {
-    const { title, description, priority, status, dueDate, assignee, relatedTo } = req.body;
+    const { title, description, priority, status, dueDate, assignee, relatedTo, assignedTo } = req.body;
     const id = `TSK-${Date.now()}`;
     const tenantId = req.tenantId || req.user?.tenant_id || '';
+    // Defaults to the creator — a Sales Rep creating their own task doesn't need to pick an assignee.
+    // Assigning it to someone else is a separate, narrower permission (checked here, not at the route
+    // gate, since the gate only sees the method+path, not the body).
+    const targetAssignee = assignedTo || req.user.sub;
+    if (targetAssignee !== req.user.sub && req.user.role_id !== 1 && !req.user.permissions?.includes('tasks:create_assign_others')) {
+      return res.status(403).json({ error: "Forbidden: missing tasks:create_assign_others" });
+    }
+    const assigneeSnapshot = assignee || await getUserBrief(targetAssignee);
     const result = await pool.query(
-      `INSERT INTO tasks (id, title, description, priority, status, due_date, assignee, related_to, tenant_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
-       RETURNING id, title, description, priority, status, due_date AS "dueDate", assignee, related_to AS "relatedTo", created_at AS "createdAt"`,
-      [id, title, description || '', priority || 'medium', status || 'todo', dueDate || '', JSON.stringify(assignee || {}), JSON.stringify(relatedTo || null), tenantId]
+      `INSERT INTO tasks (id, title, description, priority, status, due_date, assignee, related_to, tenant_id, assigned_to)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+       RETURNING id, title, description, priority, status, due_date AS "dueDate", assignee, assigned_to AS "assignedTo", related_to AS "relatedTo", created_at AS "createdAt"`,
+      [id, title, description || '', priority || 'medium', status || 'todo', dueDate || '', JSON.stringify(assigneeSnapshot), JSON.stringify(relatedTo || null), tenantId, targetAssignee]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -2036,7 +2084,7 @@ app.post('/api/tasks', async (req, res) => {
 app.patch('/api/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, priority, status, dueDate, assignee, relatedTo } = req.body;
+    const { title, description, priority, status, dueDate, assignee, relatedTo, assignedTo } = req.body;
     const setClauses = [];
     const values = [];
     let idx = 1;
@@ -2047,11 +2095,21 @@ app.patch('/api/tasks/:id', async (req, res) => {
     if (dueDate !== undefined) { setClauses.push(`due_date = $${idx++}`); values.push(dueDate); }
     if (assignee !== undefined) { setClauses.push(`assignee = $${idx++}::jsonb`); values.push(JSON.stringify(assignee)); }
     if (relatedTo !== undefined) { setClauses.push(`related_to = $${idx++}::jsonb`); values.push(JSON.stringify(relatedTo)); }
+    if (assignedTo !== undefined) {
+      if (assignedTo !== req.user.sub && req.user.role_id !== 1 && !req.user.permissions?.includes('tasks:create_assign_others')) {
+        return res.status(403).json({ error: "Forbidden: missing tasks:create_assign_others" });
+      }
+      setClauses.push(`assigned_to = $${idx++}`); values.push(assignedTo);
+      if (assignee === undefined) {
+        const snapshot = await getUserBrief(assignedTo);
+        setClauses.push(`assignee = $${idx++}::jsonb`); values.push(JSON.stringify(snapshot));
+      }
+    }
     if (setClauses.length === 0) return res.status(400).json({ error: 'No fields' });
     values.push(id);
     const result = await pool.query(
       `UPDATE tasks SET ${setClauses.join(', ')} WHERE id = $${idx}
-       RETURNING id, title, description, priority, status, due_date AS "dueDate", assignee, related_to AS "relatedTo", created_at AS "createdAt"`,
+       RETURNING id, title, description, priority, status, due_date AS "dueDate", assignee, assigned_to AS "assignedTo", related_to AS "relatedTo", created_at AS "createdAt"`,
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Task not found' });
@@ -2288,6 +2346,7 @@ app.delete('/api/stages/:id', async (req, res) => {
 // ===== Leads (Unified Inbox) =====
 app.get('/api/leads', async (req, res) => {
   try {
+    const isSalesRep = req.user.role_id === 5;
     const { text, params, limit } = keysetPaginate(
       `SELECT l.id, l.name, l.avatar, l.channel, l.channel_id::text AS "socialAccountId",
               l.external_contact_id AS "externalContactId", l.contact_id AS "contactId",
@@ -2295,8 +2354,8 @@ app.get('/api/leads', async (req, res) => {
               l.lead_score AS "leadScore", l.last_message AS "lastMessage",
               l.last_message_time AS "lastMessageTime", l.unread_count AS "unreadCount",
               l.created_at AS "createdAt"
-       FROM leads l`,
-      [], req.query, { orderBy: 'l.last_message_time', tieBreaker: 'l.id', orderDir: 'DESC', defaultLimit: 50 }
+       FROM leads l${isSalesRep ? ' WHERE l.assigned_to = $1' : ''}`,
+      isSalesRep ? [req.user.sub] : [], req.query, { orderBy: 'l.last_message_time', tieBreaker: 'l.id', orderDir: 'DESC', defaultLimit: 50 }
     );
     const result = await pool.query(text, params);
     if (req.query.cursor) {
@@ -4597,38 +4656,100 @@ app.put('/api/cs-admin/chats/:id/close', async (req, res) => {
 });
 
 // GET /api/cs-admin/performance — get CS admin response time stats
+// GET /api/cs-admin/performance
+// - No `granularity`: unchanged team-roster summary (one row per agent) over a `days` lookback — this is
+//   what the existing per-agent table in CsQueueView already consumes.
+// - `granularity=shift|day|week|month|custom`: a flexible response-time breakdown for ONE agent — the
+//   caller themselves by default ("ในกะของตัวเอง"), or `?userId=` for a supervisor (role 1/2/4) checking
+//   a specific rep. `shift` buckets by actual clock-in/clock-out rows in cs_admin_time_logs (a chat
+//   counts toward a shift when it happened between that shift's clock_in and clock_out); day/week/month
+//   bucket by date_trunc over `[from, to]` (custom requires both explicitly).
 app.get('/api/cs-admin/performance', async (req, res) => {
   try {
     const tenantId = req.tenantId || req.user?.tenant_id;
-    const days = parseInt(req.query.days || '7');
+    const isSupervisor = req.user?.role_id === 1 || req.user?.role_id === 2 || req.user?.role_id === 4;
+    const { granularity, from, to } = req.query;
+    const queryUserId = req.query.userId;
+
+    if (!granularity) {
+      const days = parseInt(req.query.days || '7');
+      const result = await pool.query(
+        `SELECT
+           cs.assigned_to,
+           u.name AS user_name,
+           u.avatar,
+           COUNT(DISTINCT cs.id) AS total_chats,
+           COUNT(DISTINCT CASE WHEN cs.first_response_at IS NOT NULL THEN cs.id END) AS responded_chats,
+           AVG(
+             CASE WHEN cs.first_response_at IS NOT NULL
+               THEN EXTRACT(EPOCH FROM (cs.first_response_at - cs.created_at)) / 60
+               ELSE NULL
+             END
+           )::numeric(10,1) AS avg_response_minutes,
+           COUNT(DISTINCT CASE WHEN cs.status = 'closed' THEN cs.id END) AS closed_chats,
+           SUM(CASE WHEN cs.status = 'closed' AND cs.closed_at IS NOT NULL
+             THEN EXTRACT(EPOCH FROM (cs.closed_at - cs.created_at)) / 3600
+             ELSE 0 END)::numeric(10,1) AS total_hours_spent
+         FROM cs_chat_sessions cs
+         LEFT JOIN users u ON u.id = cs.assigned_to
+         WHERE cs.tenant_id = $1
+           AND cs.created_at >= NOW() - INTERVAL '1 day' * $2
+           AND cs.assigned_to IS NOT NULL
+         GROUP BY cs.assigned_to, u.name, u.avatar
+         ORDER BY total_chats DESC`,
+        [tenantId, days]
+      );
+      return res.json(result.rows);
+    }
+
+    const targetUserId = (queryUserId && isSupervisor) ? queryUserId : req.user.sub;
+
+    if (granularity === 'shift') {
+      const result = await pool.query(
+        `SELECT
+           tl.id AS "shiftId", tl.clock_in AS "clockIn", tl.clock_out AS "clockOut",
+           COUNT(DISTINCT cs.id) AS "totalChats",
+           COUNT(DISTINCT CASE WHEN cs.first_response_at IS NOT NULL THEN cs.id END) AS "respondedChats",
+           AVG(CASE WHEN cs.first_response_at IS NOT NULL THEN EXTRACT(EPOCH FROM (cs.first_response_at - cs.created_at)) / 60 ELSE NULL END)::numeric(10,1) AS "avgResponseMinutes",
+           COUNT(DISTINCT CASE WHEN cs.status = 'closed' THEN cs.id END) AS "closedChats"
+         FROM cs_admin_time_logs tl
+         LEFT JOIN cs_chat_sessions cs
+           ON cs.tenant_id = tl.tenant_id AND cs.assigned_to = tl.user_id
+           AND cs.created_at >= tl.clock_in AND cs.created_at <= COALESCE(tl.clock_out, NOW())
+         WHERE tl.tenant_id = $1 AND tl.user_id = $2
+         GROUP BY tl.id, tl.clock_in, tl.clock_out
+         ORDER BY tl.clock_in DESC
+         LIMIT 100`,
+        [tenantId, targetUserId]
+      );
+      return res.json(result.rows);
+    }
+
+    if (!['day', 'week', 'month', 'custom'].includes(granularity)) {
+      return res.status(400).json({ error: 'granularity must be one of: shift, day, week, month, custom' });
+    }
+    if (granularity === 'custom' && (!from || !to)) {
+      return res.status(400).json({ error: 'from and to are required for granularity=custom' });
+    }
+    const now = new Date();
+    const defaultLookbackMs = { day: 30 * 86400000, week: 12 * 7 * 86400000, month: 365 * 86400000 }[granularity];
+    const rangeFrom = from || new Date(now.getTime() - defaultLookbackMs).toISOString();
+    const rangeTo = to || now.toISOString();
+    const bucketUnit = granularity === 'custom' ? 'day' : granularity;
 
     const result = await pool.query(
-      `SELECT
-         cs.assigned_to,
-         u.name AS user_name,
-         u.avatar,
-         COUNT(DISTINCT cs.id) AS total_chats,
-         COUNT(DISTINCT CASE WHEN cs.first_response_at IS NOT NULL THEN cs.id END) AS responded_chats,
-         AVG(
-           CASE WHEN cs.first_response_at IS NOT NULL
-             THEN EXTRACT(EPOCH FROM (cs.first_response_at - cs.created_at)) / 60
-             ELSE NULL
-           END
-         )::numeric(10,1) AS avg_response_minutes,
-         COUNT(DISTINCT CASE WHEN cs.status = 'closed' THEN cs.id END) AS closed_chats,
-         SUM(CASE WHEN cs.status = 'closed' AND cs.closed_at IS NOT NULL
-           THEN EXTRACT(EPOCH FROM (cs.closed_at - cs.created_at)) / 3600
-           ELSE 0 END)::numeric(10,1) AS total_hours_spent
+      `SELECT date_trunc('${bucketUnit}', cs.created_at) AS bucket,
+         COUNT(DISTINCT cs.id) AS "totalChats",
+         COUNT(DISTINCT CASE WHEN cs.first_response_at IS NOT NULL THEN cs.id END) AS "respondedChats",
+         AVG(CASE WHEN cs.first_response_at IS NOT NULL THEN EXTRACT(EPOCH FROM (cs.first_response_at - cs.created_at)) / 60 ELSE NULL END)::numeric(10,1) AS "avgResponseMinutes",
+         COUNT(DISTINCT CASE WHEN cs.status = 'closed' THEN cs.id END) AS "closedChats"
        FROM cs_chat_sessions cs
-       LEFT JOIN users u ON u.id = cs.assigned_to
-       WHERE cs.tenant_id = $1
-         AND cs.created_at >= NOW() - INTERVAL '1 day' * $2
-         AND cs.assigned_to IS NOT NULL
-       GROUP BY cs.assigned_to, u.name, u.avatar
-       ORDER BY total_chats DESC`,
-      [tenantId, days]
+       WHERE cs.tenant_id = $1 AND cs.assigned_to = $2
+         AND cs.created_at >= $3 AND cs.created_at <= $4
+       GROUP BY bucket
+       ORDER BY bucket ASC`,
+      [tenantId, targetUserId, rangeFrom, rangeTo]
     );
-
     res.json(result.rows);
   } catch (err) {
     console.error('Error getting CS performance:', err);
