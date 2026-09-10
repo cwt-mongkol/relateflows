@@ -44,6 +44,8 @@ const TENANT_SCOPED_TABLES = new Set([
   'audit_log', 'companies',
   'cs_admin_schedules', 'cs_admin_time_logs', 'cs_chat_sessions', 'cs_chat_messages',
   'sales_rep_allocation_status',
+  'pipeline_stages', 'leads', 'messages',
+  'workflow_executions', 'notifications',
 ]);
 
 function scopeQuery(text, params, tenantId) {
@@ -59,14 +61,17 @@ function scopeQuery(text, params, tenantId) {
   const tableMatch = text.match(/\bFROM\s+(\w+)/i) || text.match(/\bUPDATE\s+(\w+)/i) || text.match(/\bDELETE\s+FROM\s+(\w+)/i);
   if (!tableMatch || !TENANT_SCOPED_TABLES.has(tableMatch[1].toLowerCase())) return { text, params };
 
-  // Insert WHERE before ORDER BY / LIMIT / OFFSET / GROUP BY if present
+  // Insert WHERE before ORDER BY / LIMIT / OFFSET / GROUP BY / RETURNING if present
+  // (RETURNING matters for UPDATE ... WHERE ... RETURNING, common on PATCH routes — appending
+  // "AND tenant_id = $N" after the RETURNING column list would otherwise produce invalid SQL)
+  const INSERT_POINT_RE = /\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|\bGROUP\s+BY\b|\bRETURNING\b/i;
   const hasWhere = /\bWHERE\b/i.test(text);
   if (hasWhere) {
-    // Add AND tenant_id before ORDER BY/LIMIT/etc
-    const insertPoint = text.search(/\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|\bGROUP\s+BY\b/i);
+    // Add AND tenant_id before ORDER BY/LIMIT/RETURNING/etc
+    const insertPoint = text.search(INSERT_POINT_RE);
     const newParams = [...params, tenantId];
     const paramIdx = newParams.length;
-    const clause = ` AND tenant_id = $${paramIdx}`;
+    const clause = ` AND tenant_id = $${paramIdx} `;
     if (insertPoint >= 0) {
       const text2 = text.slice(0, insertPoint) + clause + text.slice(insertPoint);
       return { text: text2, params: newParams };
@@ -74,7 +79,7 @@ function scopeQuery(text, params, tenantId) {
     return { text: `${text}${clause}`, params: newParams };
   }
   const clause = ' WHERE tenant_id = $';
-  const insertPoint = text.search(/\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|\bGROUP\s+BY\b/i);
+  const insertPoint = text.search(INSERT_POINT_RE);
   const newParams = [...params, tenantId];
   const paramIdx = newParams.length;
   if (insertPoint >= 0) {
@@ -378,6 +383,163 @@ async function applyMigrations(currentVersion) {
     }
     await pool.query('INSERT INTO schema_versions (version) VALUES (7)');
     console.log('Schema version 7 applied.');
+  }
+
+  if (currentVersion < 8) {
+    console.log('Applying schema version 8 (real inbox: leads, messages, pipeline stages, activity linking)...');
+    const v8Statements = [
+      `CREATE TABLE IF NOT EXISTS pipeline_stages (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          label VARCHAR(100) NOT NULL,
+          color VARCHAR(20) DEFAULT '#94a3b8',
+          sort_order INTEGER DEFAULT 0,
+          is_closed_won BOOLEAN DEFAULT false,
+          is_closed_lost BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_pipeline_stages_tenant ON pipeline_stages(tenant_id)`,
+      `CREATE TABLE IF NOT EXISTS leads (
+          id VARCHAR(50) PRIMARY KEY,
+          tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          name VARCHAR(255) NOT NULL,
+          avatar TEXT DEFAULT '',
+          channel VARCHAR(20) NOT NULL,
+          channel_id INTEGER REFERENCES social_channels(id) ON DELETE SET NULL,
+          external_contact_id VARCHAR(255) DEFAULT '',
+          contact_id VARCHAR(50) REFERENCES contacts(id) ON DELETE SET NULL,
+          assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL,
+          is_allocated BOOLEAN DEFAULT false,
+          status VARCHAR(30) DEFAULT 'new',
+          lead_score INTEGER DEFAULT 0,
+          last_message TEXT DEFAULT '',
+          last_message_time TIMESTAMP,
+          unread_count INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(tenant_id, channel_id, external_contact_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenant_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_assigned ON leads(assigned_to)`,
+      `CREATE TABLE IF NOT EXISTS messages (
+          id VARCHAR(50) PRIMARY KEY,
+          tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          lead_id VARCHAR(50) NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+          channel VARCHAR(20) NOT NULL,
+          direction VARCHAR(10) NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+          sender_type VARCHAR(20) NOT NULL CHECK (sender_type IN ('contact', 'agent', 'system')),
+          sender_name VARCHAR(255) DEFAULT '',
+          sender_avatar TEXT DEFAULT '',
+          content TEXT NOT NULL,
+          raw_payload JSONB DEFAULT '{}',
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT NOW()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_lead ON messages(tenant_id, lead_id, created_at)`,
+      `ALTER TABLE activities ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50) DEFAULT ''`,
+      `ALTER TABLE activities ADD COLUMN IF NOT EXISTS entity_id VARCHAR(50) DEFAULT ''`,
+      `CREATE INDEX IF NOT EXISTS idx_activities_entity ON activities(tenant_id, entity_type, entity_id)`,
+      `ALTER TABLE pipeline_stages ENABLE ROW LEVEL SECURITY`,
+      `ALTER TABLE leads ENABLE ROW LEVEL SECURITY`,
+      `ALTER TABLE messages ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON pipeline_stages`,
+      `CREATE POLICY tenant_isolation ON pipeline_stages FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+      `DROP POLICY IF EXISTS tenant_isolation ON leads`,
+      `CREATE POLICY tenant_isolation ON leads FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+      `DROP POLICY IF EXISTS tenant_isolation ON messages`,
+      `CREATE POLICY tenant_isolation ON messages FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v8Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v8 migration warning:', err.message);
+      }
+    }
+
+    // Seed default pipeline stages for every tenant that doesn't have any yet
+    // (mirrors INITIAL_STAGES from src/data/mockData.ts so existing deals keep resolving to a label)
+    const DEFAULT_STAGES = [
+      { id: 'lead_in', label: 'Lead In', color: '#94a3b8', sort_order: 0, is_closed_won: false, is_closed_lost: false },
+      { id: 'contacted', label: 'Contacted', color: '#60a5fa', sort_order: 1, is_closed_won: false, is_closed_lost: false },
+      { id: 'proposal', label: 'Proposal', color: '#2563eb', sort_order: 2, is_closed_won: false, is_closed_lost: false },
+      { id: 'negotiation', label: 'Negotiation', color: '#f59e0b', sort_order: 3, is_closed_won: false, is_closed_lost: false },
+      { id: 'closed_won', label: 'Closed Won', color: '#10b981', sort_order: 4, is_closed_won: true, is_closed_lost: false },
+      { id: 'closed_lost', label: 'Closed Lost', color: '#fb7185', sort_order: 5, is_closed_won: false, is_closed_lost: true },
+    ];
+    try {
+      const tenants = await pool.query('SELECT id FROM tenant_companies');
+      for (const t of tenants.rows) {
+        const existing = await pool.query('SELECT 1 FROM pipeline_stages WHERE tenant_id = $1 LIMIT 1', [t.id]);
+        if (existing.rows.length > 0) continue;
+        for (const s of DEFAULT_STAGES) {
+          await pool.query(
+            `INSERT INTO pipeline_stages (id, tenant_id, label, color, sort_order, is_closed_won, is_closed_lost)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (tenant_id, id) DO NOTHING`,
+            [s.id, t.id, s.label, s.color, s.sort_order, s.is_closed_won, s.is_closed_lost]
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('v8 stage seed warning:', err.message);
+    }
+
+    await pool.query('INSERT INTO schema_versions (version) VALUES (8)');
+    console.log('Schema version 8 applied.');
+  }
+
+  if (currentVersion < 9) {
+    console.log('Applying schema version 9 (automation engine + notifications)...');
+    const v9Statements = [
+      `ALTER TABLE workflows ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(50) DEFAULT ''`,
+      `ALTER TABLE workflows ADD COLUMN IF NOT EXISTS conditions JSONB DEFAULT '[]'`,
+      `ALTER TABLE workflows ADD COLUMN IF NOT EXISTS actions JSONB DEFAULT '[]'`,
+      `CREATE TABLE IF NOT EXISTS workflow_executions (
+          id VARCHAR(50) PRIMARY KEY,
+          tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          workflow_id VARCHAR(50) REFERENCES workflows(id) ON DELETE CASCADE,
+          event_type VARCHAR(50) NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'success',
+          actions_taken JSONB DEFAULT '[]',
+          error_message TEXT DEFAULT '',
+          entity_type VARCHAR(50) DEFAULT '',
+          entity_id VARCHAR(50) DEFAULT '',
+          created_at TIMESTAMP DEFAULT NOW()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_executions_wf ON workflow_executions(tenant_id, workflow_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_executions_entity ON workflow_executions(tenant_id, entity_type, entity_id)`,
+      `CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(50) PRIMARY KEY,
+          tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          type VARCHAR(50) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          body TEXT DEFAULT '',
+          entity_type VARCHAR(50) DEFAULT '',
+          entity_id VARCHAR(50) DEFAULT '',
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT NOW()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(tenant_id, user_id, created_at DESC)`,
+      `ALTER TABLE workflow_executions ENABLE ROW LEVEL SECURITY`,
+      `ALTER TABLE notifications ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON workflow_executions`,
+      `CREATE POLICY tenant_isolation ON workflow_executions FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+      `DROP POLICY IF EXISTS tenant_isolation ON notifications`,
+      `CREATE POLICY tenant_isolation ON notifications FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v9Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v9 migration warning:', err.message);
+      }
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (9)');
+    console.log('Schema version 9 applied.');
   }
 }
 

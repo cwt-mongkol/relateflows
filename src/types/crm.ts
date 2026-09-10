@@ -6,6 +6,9 @@ export interface PipelineStage {
   id: string;
   label: string;
   color: string;
+  sortOrder?: number;
+  isClosedWon?: boolean;
+  isClosedLost?: boolean;
 }
 
 export interface Deal {
@@ -72,6 +75,33 @@ export interface Activity {
     avatar: string;
   };
   targetName?: string;
+  entityType?: string;
+  entityId?: string;
+}
+
+export type WorkflowTriggerType =
+  | 'lead.created'
+  | 'lead.message_received'
+  | 'lead.allocated'
+  | 'deal.created'
+  | 'deal.stage_changed'
+  | 'deal.won'
+  | 'task.completed'
+  | 'schedule.lead_no_reply';
+
+export type WorkflowActionType = 'create_task' | 'send_notification' | 'assign_lead' | 'add_tag' | 'move_deal_stage';
+
+export type ConditionOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+
+export interface WorkflowCondition {
+  field: string;
+  operator: ConditionOperator;
+  value: string | number;
+}
+
+export interface WorkflowAction {
+  type: WorkflowActionType;
+  params: Record<string, string | number | undefined>;
 }
 
 export interface WorkflowRule {
@@ -80,11 +110,36 @@ export interface WorkflowRule {
   description: string;
   trigger: string;
   action: string;
-  status: 0 | 1;
+  status: 'active' | 'paused';
+  triggerType: WorkflowTriggerType;
+  conditions: WorkflowCondition[];
+  actions: WorkflowAction[];
   executionsCount: number;
   lastExecuted: string;
   category: 'Lead Nurturing' | 'Sales Operations' | 'Deal Routing' | 'Customer Success';
   accentColor?: string;
+}
+
+export interface WorkflowExecution {
+  id: string;
+  eventType: string;
+  status: 'success' | 'error';
+  actionsTaken: { type: string; status: string; detail?: unknown }[];
+  errorMessage?: string;
+  entityType: string;
+  entityId: string;
+  createdAt: string;
+}
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  entityType?: string;
+  entityId?: string;
+  isRead: boolean;
+  createdAt: string;
 }
 
 export interface Category {
@@ -226,6 +281,9 @@ export interface Lead {
   tags?: CustomerTag[];
   allocationHistory?: AllocationRecord[];
   createdAt: string;
+  contactId?: string;
+  status?: string;
+  leadScore?: number;
 }
 
 export interface Task {

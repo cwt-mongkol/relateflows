@@ -12,6 +12,7 @@ export const DealDetailModal: React.FC = () => {
   const dealActivities = useMemo(() => {
     if (!selectedDeal) return [];
     return activities.filter(a =>
+      (a.entityType === 'deal' && a.entityId === selectedDeal.id) ||
       a.targetName?.includes(selectedDeal.company) ||
       a.description?.includes(selectedDeal.title)
     );

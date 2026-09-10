@@ -42,7 +42,7 @@ function getStatusBadges(t: (key: string) => string): Record<ProductStatus, { la
 const EMPTY_PRODUCT_FORM: ProductFormData = { leadId: '', categoryId: null, name: '', quantity: 1, price: 0, description: '', notes: '', status: 0 };
 
 export const InboxView: React.FC = () => {
-  const { isLoading, leads, chatMessages, selectedLead, setSelectedLead, categories, socialAccounts, products, addProduct, updateProduct, deleteProduct, leadTags, getAllocationHistory, allocateLead } = useCRM();
+  const { isLoading, leads, chatMessages, sendChatMessage, selectedLead, setSelectedLead, categories, socialAccounts, products, addProduct, updateProduct, deleteProduct, leadTags, getAllocationHistory, allocateLead } = useCRM();
   const { t, language } = useSettings();
   const STATUS_BADGES = useMemo(() => getStatusBadges(t), [t, language]);
 
@@ -114,6 +114,20 @@ export const InboxView: React.FC = () => {
     setChatInput(msg);
     setShowQuickReplies(false);
   }, []);
+
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+
+  const handleSendMessage = useCallback(async () => {
+    const content = chatInput.trim();
+    if (!content || !selectedLead || isSendingMessage) return;
+    setIsSendingMessage(true);
+    setChatInput('');
+    try {
+      await sendChatMessage(selectedLead.id, content);
+    } finally {
+      setIsSendingMessage(false);
+    }
+  }, [chatInput, selectedLead, isSendingMessage, sendChatMessage]);
 
   // Load sales users for allocation
   const allocationHistory = useMemo(() => selectedLead ? getAllocationHistory(selectedLead.id) : [], [getAllocationHistory, selectedLead]);
@@ -481,11 +495,16 @@ export const InboxView: React.FC = () => {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                   placeholder={t('inbox.typeMessage')}
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
                 />
-                <button className="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-xl transition-all">
-                  <ArrowRight className="w-4 h-4" />
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!chatInput.trim() || isSendingMessage}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white p-2.5 rounded-xl transition-all"
+                >
+                  {isSendingMessage ? <span className="loading loading-spinner loading-xs" /> : <ArrowRight className="w-4 h-4" />}
                 </button>
               </div>
             </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSettings, type IntegrationKeys } from '../../context/SettingsContext';
 import { useCRM } from '../../context/CRMContext';
+import { useToast } from '../../context/ToastContext';
 import { Bot, Palette, CheckCircle2, Save, Globe, Sun, Moon, Monitor, Sliders, Kanban, Plus, X, Edit3, Key, MessageCircle, MessageSquare, Eye, EyeOff, Shield, Users, Radio, Lock, Building2, Loader2, Database, Mail, Phone, Headphones, Search, Trash2, Power, AlertTriangle } from 'lucide-react';
 import { STAGE_COLORS } from '../../data/mockData';
 import type { SettingsTab } from '../../types/crm';
@@ -33,6 +34,7 @@ const TABS: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
 export const SettingsView: React.FC = () => {
   const { t, language, setLanguage, theme, setTheme, primaryColor, setPrimaryColor, accentColor, setAccentColor, saveSettings, savedSuccess } = useSettings();
   const { stages, addStage, renameStage, deleteStage } = useCRM();
+  const { addToast } = useToast();
   const { canSettingsTab, roleName } = usePermissions();
   const visibleTabs = TABS.filter(t => canSettingsTab(t.key));
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -65,6 +67,16 @@ export const SettingsView: React.FC = () => {
     renameStage(id, editLabel.trim());
     setEditingStageId(null);
     setEditLabel('');
+  };
+
+  const handleDeleteStage = async (id: string) => {
+    try {
+      await deleteStage(id);
+    } catch (err: any) {
+      let message = 'Could not delete stage — it may still have deals in it.';
+      try { message = JSON.parse(err?.message)?.error || message; } catch { /* not JSON, use default */ }
+      addToast(message, 'error');
+    }
   };
 
   return (
@@ -203,7 +215,7 @@ export const SettingsView: React.FC = () => {
                       <span className="flex-1 text-xs font-bold text-slate-800">{stage.label}</span>
                       <span className="text-[10px] text-slate-400 font-mono">{stage.color}</span>
                       <button onClick={() => { setEditingStageId(stage.id); setEditLabel(stage.label); }} className="p-1.5 rounded-lg text-slate-300 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all"><Edit3 className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => deleteStage(stage.id)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"><X className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => handleDeleteStage(stage.id)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"><X className="w-3.5 h-3.5" /></button>
                     </>
                   )}
                 </div>

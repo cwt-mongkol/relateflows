@@ -54,10 +54,13 @@ const SCHEMAS = [
   }],
 
   // ── Deals ──
+  // NOTE: matches the real payload shape sent by CRMContext.tsx addDeal (title/company/value/stage/...) —
+  // an earlier version of this schema required "name"/"contactId", fields the frontend never sends, which
+  // caused every deal created through the UI to 400 and silently fall back to local-only (unpersisted) state.
   [/^POST \/api\/deals$/, {
-    name: { required: true, type: 'string', maxLength: 200 },
+    title: { required: true, type: 'string', maxLength: 200 },
+    company: { required: true, type: 'string', maxLength: 200 },
     value: { type: 'number', min: 0 },
-    contactId: { type: 'string' },
   }],
 
   // ── Contacts ──
@@ -68,14 +71,18 @@ const SCHEMAS = [
   }],
 
   // ── Activities ──
+  // NOTE: matches the real payload shape sent by CRMContext.tsx (type/title/description/user/targetName) —
+  // an earlier version of this schema required a "subject" field that the frontend never sends, which
+  // caused every real activity POST (from addDeal/updateDealStage) to 400.
   [/^POST \/api\/activities$/, {
     type: { required: true, type: 'string', maxLength: 50 },
-    subject: { required: true, type: 'string', maxLength: 200 },
+    title: { required: true, type: 'string', maxLength: 200 },
   }],
 
-  // ── Workflows ──
+  // ── Workflows (Automation Engine) ──
   [/^POST \/api\/workflows$/, {
-    name: { required: true, type: 'string', maxLength: 200 },
+    title: { required: true, type: 'string', maxLength: 200 },
+    triggerType: { required: true, type: 'string', maxLength: 50 },
   }],
   [/^PATCH \/api\/workflows\/[^/]+\/toggle$/, {
     active: { type: 'boolean' },
@@ -86,10 +93,10 @@ const SCHEMAS = [
     title: { required: true, type: 'string', maxLength: 200 },
     description: { type: 'string', maxLength: 2000 },
   }],
-  [/^PATCH \/api\/tasks\/\d+$/, {
+  [/^PATCH \/api\/tasks\/[^/]+$/, {
     title: { type: 'string', maxLength: 200 },
     description: { type: 'string', maxLength: 2000 },
-    status: { type: 'string', oneOf: ['pending', 'in_progress', 'completed'] },
+    status: { type: 'string', oneOf: ['todo', 'in_progress', 'done'] },
   }],
 
   // ── Tags ──
@@ -112,23 +119,26 @@ const SCHEMAS = [
   }],
 
   // ── Channel Management ──
+  // NOTE: matches the real payload field (displayName, not name) sent by ChannelManagement.tsx.
   [/^POST \/api\/channels$/, {
-    name: { required: true, type: 'string', maxLength: 100 },
+    displayName: { required: true, type: 'string', maxLength: 100 },
     type: { required: true, type: 'string', maxLength: 50 },
   }],
   [/^PATCH \/api\/channels\/\d+$/, {
-    name: { type: 'string', maxLength: 100 },
+    displayName: { type: 'string', maxLength: 100 },
   }],
 
   // ── Channel Access ──
+  // NOTE: matches the real payload (channelIds array, not a single channelId) sent by AccessControl.tsx.
   [/^POST \/api\/channel-access$/, {
     userId: { required: true, type: 'string' },
-    channelId: { required: true, type: 'number' },
+    channelIds: { required: true, type: 'array' },
   }],
 
   // ── Lead allocation ──
+  // NOTE: matches the real payload field (salesPersonId, not userId) sent by CRMContext.tsx allocateLead.
   [/^POST \/api\/leads\/[^/]+\/allocate$/, {
-    userId: { required: true, type: 'string' },
+    salesPersonId: { required: true, type: 'string' },
   }],
 
   // ── Leads ──
@@ -148,6 +158,28 @@ const SCHEMAS = [
   // ── Deal stage update ──
   [/^PATCH \/api\/deals\/[^/]+\/stage$/, {
     stage: { required: true, type: 'string', maxLength: 100 },
+  }],
+
+  // ── Pipeline Stages ──
+  [/^POST \/api\/stages$/, {
+    id: { required: true, type: 'string', maxLength: 50, pattern: /^[a-zA-Z0-9_-]+$/ },
+    label: { required: true, type: 'string', maxLength: 100 },
+  }],
+  [/^PATCH \/api\/stages\/[^/]+$/, {
+    label: { type: 'string', maxLength: 100 },
+    color: { type: 'string', maxLength: 20 },
+  }],
+
+  // ── Leads (Unified Inbox) ──
+  [/^PATCH \/api\/leads\/[^/]+$/, {
+    assignedTo: { type: 'string', maxLength: 50 },
+    status: { type: 'string', maxLength: 30 },
+  }],
+
+  // ── Chat Messages ──
+  [/^POST \/api\/chat-messages$/, {
+    leadId: { required: true, type: 'string', maxLength: 50 },
+    content: { required: true, type: 'string', maxLength: 4000 },
   }],
 
   // ── Super Admin: create tenant ──

@@ -23,6 +23,8 @@ import type {
   Task,
   CustomerTag,
   AllocationRecord,
+  AppNotification,
+  WorkflowExecution,
 } from '../types/crm';
 import { 
   INITIAL_DEALS, 
@@ -78,14 +80,17 @@ interface CRMContextType {
   deleteContact: (contactId: string) => Promise<void>;
   
   toggleWorkflowStatus: (workflowId: string) => Promise<void>;
-  addWorkflow: (workflow: Omit<WorkflowRule, 'id' | 'executionsCount' | 'lastExecuted'>) => Promise<void>;
+  addWorkflow: (workflow: Omit<WorkflowRule, 'id' | 'executionsCount' | 'lastExecuted' | 'trigger' | 'action'>) => Promise<void>;
+  deleteWorkflow: (workflowId: string) => Promise<void>;
+  getWorkflowExecutions: (workflowId: string) => Promise<WorkflowExecution[]>;
 
-  addStage: (stage: PipelineStage) => void;
-  renameStage: (id: string, label: string) => void;
-  deleteStage: (id: string) => void;
-  
+  addStage: (stage: PipelineStage) => Promise<void>;
+  renameStage: (id: string, label: string) => Promise<void>;
+  deleteStage: (id: string) => Promise<void>;
+
   leads: Lead[];
   chatMessages: ChatMessage[];
+  sendChatMessage: (leadId: string, content: string) => Promise<void>;
   selectedLead: Lead | null;
   setSelectedLead: (l: Lead | null) => void;
   tags: CustomerTag[];
@@ -119,8 +124,10 @@ interface CRMContextType {
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
 
+  notifications: AppNotification[];
   notificationCount: number;
-  clearNotifications: () => void;
+  markNotificationRead: (id: string) => Promise<void>;
+  clearNotifications: () => Promise<void>;
 }
 
 const CRMContext = createContext<CRMContextType | undefined>(undefined);
@@ -147,31 +154,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [allocations, setAllocations] = useState<AllocationRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [socialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
+  const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
-  // Per-user stages from localStorage
-  const [stages, setStages] = useState<PipelineStage[]>(() => {
-    try {
-      const saved = localStorage.getItem(`rf-stages-${userId}`);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return INITIAL_STAGES;
-  });
+  // Pipeline stages — real, tenant-shared data from /api/stages (loaded below), mock data until then
+  const [stages, setStages] = useState<PipelineStage[]>(INITIAL_STAGES);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [isAddDealModalOpen, setIsAddDealModalOpen] = useState(false);
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
   const [isAddWorkflowModalOpen, setIsAddWorkflowModalOpen] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(4);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const notificationCount = notifications.filter((n) => !n.isRead).length;
 
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
       try {
 
-        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData] = await Promise.all([
+        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData, channelsData] = await Promise.all([
           api.get<Deal[]>('/api/deals').catch(() => null),
           api.get<Contact[]>('/api/contacts').catch(() => null),
           api.get<CompanyAccount[]>('/api/companies').catch(() => null),
@@ -187,11 +189,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           api.get<Task[]>('/api/tasks').catch(() => null),
           api.get<CustomerTag[]>('/api/tags').catch(() => null),
           api.get<AllocationRecord[]>('/api/leads/allocations').catch(() => null),
+          api.get<{ id: number; type: string; displayName: string; status: string }[]>('/api/inbox/channels').catch(() => null),
         ]) as [
           Deal[] | null, Contact[] | null, CompanyAccount[] | null, Activity[] | null,
           WorkflowRule[] | null, MetricCardData[] | null, PipelineStage[] | null,
           Lead[] | null, ChatMessage[] | null, Product[] | null, Category[] | null,
-          Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null
+          Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null,
+          { id: number; type: string; displayName: string; status: string }[] | null
         ];
 
         // Use API data if available and non-empty, otherwise fall back to mock data
@@ -211,15 +215,44 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setTags(tagsData && tagsData.length > 0 ? tagsData : INITIAL_TAGS);
         setLeadTags(LEAD_TAGS);
         setAllocations(allocData && allocData.length > 0 ? allocData : INITIAL_ALLOCATIONS);
+        if (channelsData && channelsData.length > 0) {
+          setSocialAccounts(channelsData.map((c) => ({
+            id: String(c.id),
+            channel: c.type as SocialAccount['channel'],
+            name: c.displayName,
+            avatar: '',
+            connected: c.status === 'connected',
+          })));
+        }
       } catch (err) {
         console.warn('Failed to load data, using mock data:', err);
       }
       setIsLoading(false);
     }
     loadData();
+
+    api.get<AppNotification[]>('/api/notifications')
+      .then(setNotifications)
+      .catch(() => setNotifications([]));
   }, [userId]);
 
-  const clearNotifications = () => setNotificationCount(0);
+  const markNotificationRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, isRead: true } : n));
+    try {
+      await api.patch(`/api/notifications/${id}/read`, {});
+    } catch (err) {
+      console.warn('API failed for markNotificationRead.', err);
+    }
+  };
+
+  const clearNotifications = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    try {
+      await api.patch('/api/notifications/read-all', {});
+    } catch (err) {
+      console.warn('API failed for clearNotifications.', err);
+    }
+  };
 
   const addDeal = async (newDealData: Omit<Deal, 'id' | 'createdAt'>) => {
     try {
@@ -235,7 +268,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: 'You (Current User)',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
         },
-        targetName: `$${savedDeal.value.toLocaleString()}`
+        targetName: `$${savedDeal.value.toLocaleString()}`,
+        entityType: 'deal',
+        entityId: savedDeal.id,
       };
       const savedAct = await api.post<any>('/api/activities', newActData);
       setActivities((prev) => [savedAct, ...prev]);
@@ -263,7 +298,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: 'You (Current User)',
         avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       },
-      targetName: `$${newDeal.value.toLocaleString()}`
+      targetName: `$${newDeal.value.toLocaleString()}`,
+      entityType: 'deal',
+      entityId: newId,
     };
     setActivities((prev) => [newActivity, ...prev]);
   };
@@ -286,7 +323,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: 'You (Current User)',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
         },
-        targetName: updatedDeal.company
+        targetName: updatedDeal.company,
+        entityType: 'deal',
+        entityId: dealId,
       };
       const savedAct = await api.post<any>('/api/activities', newActData);
       setActivities((prev) => [savedAct, ...prev]);
@@ -315,7 +354,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               name: 'You (Current User)',
               avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
             },
-            targetName: deal.company
+            targetName: deal.company,
+            entityType: 'deal',
+            entityId: dealId,
           };
           setActivities((actPrev) => [newActivity, ...actPrev]);
 
@@ -391,13 +432,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWorkflows((prev) =>
       prev.map((wf) =>
         wf.id === workflowId
-          ? { ...wf, status: wf.status === 0 ? 1 : 0 }
+          ? { ...wf, status: wf.status === 'active' ? 'paused' : 'active' }
           : wf
       )
     );
   };
 
-  const addWorkflow = async (newWfData: Omit<WorkflowRule, 'id' | 'executionsCount' | 'lastExecuted'>) => {
+  const addWorkflow = async (newWfData: Omit<WorkflowRule, 'id' | 'executionsCount' | 'lastExecuted' | 'trigger' | 'action'>) => {
     try {
       const savedWf = await api.post<any>('/api/workflows', newWfData);
       setWorkflows((prev) => [savedWf, ...prev]);
@@ -411,10 +452,32 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newWf: WorkflowRule = {
       ...newWfData,
       id: newId,
+      trigger: newWfData.triggerType,
+      action: newWfData.actions.map((a) => a.type).join(' + ') || 'No actions',
       executionsCount: 0,
       lastExecuted: 'Never'
     };
     setWorkflows((prev) => [newWf, ...prev]);
+  };
+
+  const deleteWorkflow = async (workflowId: string) => {
+    try {
+      await api.delete(`/api/workflows/${workflowId}`);
+      setWorkflows((prev) => prev.filter((wf) => wf.id !== workflowId));
+      return;
+    } catch (err) {
+      console.warn('API connection failed for deleteWorkflow, falling back to local state update.', err);
+    }
+    setWorkflows((prev) => prev.filter((wf) => wf.id !== workflowId));
+  };
+
+  const getWorkflowExecutions = async (workflowId: string): Promise<WorkflowExecution[]> => {
+    try {
+      return await api.get<WorkflowExecution[]>(`/api/workflows/${workflowId}/executions`);
+    } catch (err) {
+      console.warn('API failed for getWorkflowExecutions.', err);
+      return [];
+    }
   };
 
   const addProduct = async (data: ProductFormData) => {
@@ -531,32 +594,63 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCategories((prev) => prev.filter((c) => c.id !== id));
   };
 
-  const persistStages = (updated: PipelineStage[]) => {
-    localStorage.setItem(`rf-stages-${userId}`, JSON.stringify(updated));
+  const addStage = async (stage: PipelineStage) => {
+    try {
+      const saved = await api.post<PipelineStage>('/api/stages', stage);
+      setStages((prev) => [...prev, saved]);
+      return;
+    } catch (err) {
+      console.warn('API failed for addStage, falling back to local state update.', err);
+    }
+    setStages((prev) => [...prev, stage]);
   };
 
-  const addStage = (stage: PipelineStage) => {
-    setStages((prev) => {
-      const updated = [...prev, stage];
-      persistStages(updated);
-      return updated;
-    });
+  const renameStage = async (id: string, label: string) => {
+    try {
+      const updated = await api.patch<PipelineStage>(`/api/stages/${id}`, { label });
+      setStages((prev) => prev.map((s) => s.id === id ? updated : s));
+      return;
+    } catch (err) {
+      console.warn('API failed for renameStage, falling back to local state update.', err);
+    }
+    setStages((prev) => prev.map((s) => s.id === id ? { ...s, label } : s));
   };
 
-  const renameStage = (id: string, label: string) => {
-    setStages((prev) => {
-      const updated = prev.map((s) => s.id === id ? { ...s, label } : s);
-      persistStages(updated);
-      return updated;
-    });
+  const deleteStage = async (id: string) => {
+    try {
+      await api.delete(`/api/stages/${id}`);
+      setStages((prev) => prev.filter((s) => s.id !== id));
+      return;
+    } catch (err) {
+      console.warn('API failed for deleteStage (stage may be in use by a deal).', err);
+      throw err;
+    }
   };
 
-  const deleteStage = (id: string) => {
-    setStages((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      persistStages(updated);
-      return updated;
-    });
+  const sendChatMessage = async (leadId: string, content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    try {
+      const saved = await api.post<any>('/api/chat-messages', { leadId, content: trimmed });
+      setChatMessages((prev) => [...prev, saved]);
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, lastMessage: trimmed, lastMessageTime: 'Just now' } : l));
+      return;
+    } catch (err) {
+      console.warn('API failed for sendChatMessage, falling back to local state update.', err);
+    }
+    const newMessage: ChatMessage = {
+      id: `MSG-${Date.now()}`,
+      channel: leads.find((l) => l.id === leadId)?.channel || 'facebook',
+      leadId,
+      from: 'agent',
+      senderName: 'You (Current User)',
+      senderAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      content: trimmed,
+      timestamp: 'Just now',
+      isRead: true,
+    };
+    setChatMessages((prev) => [...prev, newMessage]);
+    setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, lastMessage: trimmed, lastMessageTime: 'Just now' } : l));
   };
 
   const addTask = async (data: Omit<Task, 'id' | 'createdAt'>) => {
@@ -748,6 +842,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stages,
         leads,
         chatMessages,
+        sendChatMessage,
         selectedLead,
         setSelectedLead,
         tags,
@@ -772,6 +867,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteContact,
         toggleWorkflowStatus,
         addWorkflow,
+        deleteWorkflow,
+        getWorkflowExecutions,
         addStage,
         renameStage,
         deleteStage,
@@ -800,7 +897,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTask,
         updateTask,
         deleteTask,
+        notifications,
         notificationCount,
+        markNotificationRead,
         clearNotifications
       }}
     >

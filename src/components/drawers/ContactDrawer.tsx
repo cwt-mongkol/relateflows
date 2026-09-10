@@ -22,11 +22,13 @@ export const ContactDrawer: React.FC = () => {
 
   const linkedActivities = useMemo(() => {
     if (!selectedContact) return [];
+    const dealIds = new Set(linkedDeals.map((d) => d.id));
     return activities.filter(a =>
+      (a.entityType === 'deal' && !!a.entityId && dealIds.has(a.entityId)) ||
       a.targetName?.includes(selectedContact.name) ||
       a.targetName?.includes(selectedContact.company)
     );
-  }, [activities, selectedContact]);
+  }, [activities, selectedContact, linkedDeals]);
 
   if (!selectedContact) return null;
 

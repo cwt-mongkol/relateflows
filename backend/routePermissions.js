@@ -5,6 +5,9 @@ const RULES = [
   // ── Dashboard ──
   { methods: ['GET'], pattern: /^\/api\/metrics/, permission: 'analytics:view' },
   { methods: ['GET'], pattern: /^\/api\/stages$/, permission: 'pipeline:view_deals' },
+  { methods: ['POST'], pattern: /^\/api\/stages$/, permission: 'pipeline:stage_crud_settings' },
+  { methods: ['PATCH'], pattern: /^\/api\/stages\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
+  { methods: ['DELETE'], pattern: /^\/api\/stages\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
 
   // ── Pipeline / Deals ──
   { methods: ['GET'], pattern: /^\/api\/deals$/, permission: 'pipeline:view_deals' },
@@ -23,10 +26,13 @@ const RULES = [
   { methods: ['PATCH'], pattern: /^\/api\/tasks\/[^/]+$/, permission: 'tasks:edit_delete' },
   { methods: ['DELETE'], pattern: /^\/api\/tasks\/[^/]+$/, permission: 'tasks:edit_delete' },
 
-  // ── Workflows ──
+  // ── Workflows (Automation Engine) ──
   { methods: ['GET'], pattern: /^\/api\/workflows$/, permission: 'workflows:view' },
+  { methods: ['GET'], pattern: /^\/api\/workflow-meta$/, permission: 'workflows:view' },
   { methods: ['POST'], pattern: /^\/api\/workflows$/, permission: 'workflows:create_toggle_edit' },
   { methods: ['PATCH'], pattern: /^\/api\/workflows\/[^/]+\/toggle$/, permission: 'workflows:create_toggle_edit' },
+  { methods: ['DELETE'], pattern: /^\/api\/workflows\/[^/]+$/, permission: 'workflows:create_toggle_edit' },
+  { methods: ['GET'], pattern: /^\/api\/workflows\/[^/]+\/executions$/, permission: 'workflows:view' },
 
   // ── Calendar ──
   { methods: ['GET'], pattern: /^\/api\/calendar\/events$/, permission: 'calendar:view_create_appointment' },
@@ -113,9 +119,11 @@ const RULES = [
   // ── Permissions listing ──
   { methods: ['GET'], pattern: /^\/api\/permissions$/, permission: 'settings_roles_permissions:create_edit_role_matrix' },
 
-  // ── Stubs (low-risk, no strict permission needed) ──
+  // ── Leads / Chat Messages (Unified Inbox) ──
   { methods: ['GET'], pattern: /^\/api\/leads$/, permission: 'pipeline:view_deals' },
+  { methods: ['PATCH'], pattern: /^\/api\/leads\/[^/]+$/, permission: 'social_inbox:lead_allocation' },
   { methods: ['GET'], pattern: /^\/api\/chat-messages$/, permission: 'social_inbox:view_channel' },
+  { methods: ['POST'], pattern: /^\/api\/chat-messages$/, permission: 'social_inbox:reply' },
   { methods: ['GET'], pattern: /^\/api\/leads\/allocations$/, permission: 'social_inbox:lead_allocation' },
 ];
 

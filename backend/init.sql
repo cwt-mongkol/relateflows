@@ -706,5 +706,132 @@ SELECT id, 'tenant-default-001', FALSE, role_id FROM users
 WHERE tenant_id IS NULL AND role_id = 1
 ON CONFLICT DO NOTHING;
 
+-- ===== Real Inbox: Pipeline Stages, Leads, Messages, structured Activity linking =====
+
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+    id VARCHAR(50) NOT NULL,
+    tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    label VARCHAR(100) NOT NULL,
+    color VARCHAR(20) DEFAULT '#94a3b8',
+    sort_order INTEGER DEFAULT 0,
+    is_closed_won BOOLEAN DEFAULT false,
+    is_closed_lost BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_tenant ON pipeline_stages(tenant_id);
+
+CREATE TABLE IF NOT EXISTS leads (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    avatar TEXT DEFAULT '',
+    channel VARCHAR(20) NOT NULL,
+    channel_id INTEGER REFERENCES social_channels(id) ON DELETE SET NULL,
+    external_contact_id VARCHAR(255) DEFAULT '',
+    contact_id VARCHAR(50) REFERENCES contacts(id) ON DELETE SET NULL,
+    assigned_to VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL,
+    is_allocated BOOLEAN DEFAULT false,
+    status VARCHAR(30) DEFAULT 'new',
+    lead_score INTEGER DEFAULT 0,
+    last_message TEXT DEFAULT '',
+    last_message_time TIMESTAMP,
+    unread_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, channel_id, external_contact_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_leads_assigned ON leads(assigned_to);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    lead_id VARCHAR(50) NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    channel VARCHAR(20) NOT NULL,
+    direction VARCHAR(10) NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+    sender_type VARCHAR(20) NOT NULL CHECK (sender_type IN ('contact', 'agent', 'system')),
+    sender_name VARCHAR(255) DEFAULT '',
+    sender_avatar TEXT DEFAULT '',
+    content TEXT NOT NULL,
+    raw_payload JSONB DEFAULT '{}',
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_lead ON messages(tenant_id, lead_id, created_at);
+
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50) DEFAULT '';
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS entity_id VARCHAR(50) DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_activities_entity ON activities(tenant_id, entity_type, entity_id);
+
+ALTER TABLE pipeline_stages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON pipeline_stages;
+CREATE POLICY tenant_isolation ON pipeline_stages FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON leads;
+CREATE POLICY tenant_isolation ON leads FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON messages;
+CREATE POLICY tenant_isolation ON messages FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+
+-- Seed default pipeline stages for the default tenant (mirrors src/data/mockData.ts INITIAL_STAGES)
+INSERT INTO pipeline_stages (id, tenant_id, label, color, sort_order, is_closed_won, is_closed_lost) VALUES
+    ('lead_in', 'tenant-default-001', 'Lead In', '#94a3b8', 0, false, false),
+    ('contacted', 'tenant-default-001', 'Contacted', '#60a5fa', 1, false, false),
+    ('proposal', 'tenant-default-001', 'Proposal', '#2563eb', 2, false, false),
+    ('negotiation', 'tenant-default-001', 'Negotiation', '#f59e0b', 3, false, false),
+    ('closed_won', 'tenant-default-001', 'Closed Won', '#10b981', 4, true, false),
+    ('closed_lost', 'tenant-default-001', 'Closed Lost', '#fb7185', 5, false, true)
+ON CONFLICT (tenant_id, id) DO NOTHING;
+
+-- ===== Automation Engine + Notifications =====
+
+ALTER TABLE workflows ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(50) DEFAULT '';
+ALTER TABLE workflows ADD COLUMN IF NOT EXISTS conditions JSONB DEFAULT '[]';
+ALTER TABLE workflows ADD COLUMN IF NOT EXISTS actions JSONB DEFAULT '[]';
+
+CREATE TABLE IF NOT EXISTS workflow_executions (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    workflow_id VARCHAR(50) REFERENCES workflows(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    actions_taken JSONB DEFAULT '[]',
+    error_message TEXT DEFAULT '',
+    entity_type VARCHAR(50) DEFAULT '',
+    entity_id VARCHAR(50) DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_wf ON workflow_executions(tenant_id, workflow_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_entity ON workflow_executions(tenant_id, entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(50) REFERENCES tenant_companies(id) ON DELETE CASCADE,
+    user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    body TEXT DEFAULT '',
+    entity_type VARCHAR(50) DEFAULT '',
+    entity_id VARCHAR(50) DEFAULT '',
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(tenant_id, user_id, created_at DESC);
+
+ALTER TABLE workflow_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON workflow_executions;
+CREATE POLICY tenant_isolation ON workflow_executions FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+DROP POLICY IF EXISTS tenant_isolation ON notifications;
+CREATE POLICY tenant_isolation ON notifications FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar);
+
 
 

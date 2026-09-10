@@ -1,8 +1,10 @@
 import app from './app.js';
 import { initDb, pool } from './db.js';
+import { runScheduledChecks } from './automation.js';
 
 const PORT = process.env.PORT || 5000;
 let server;
+let schedulerInterval;
 
 // Centralized env validation
 const REQUIRED_ENV = ['JWT_SECRET', 'ENCRYPTION_KEY', 'DATABASE_URL'];
@@ -31,12 +33,17 @@ function validateEnv() {
 
 validateEnv();
 
+const SCHEDULER_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes — checks time-based automation triggers (e.g. "lead no reply")
+
 async function startServer() {
   try {
     await initDb();
     server = app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
+    schedulerInterval = setInterval(() => {
+      runScheduledChecks().catch((err) => console.error('Scheduled workflow check failed:', err.message));
+    }, SCHEDULER_INTERVAL_MS);
   } catch (err) {
     console.error('Failed to start server:', err);
     process.exit(1);
@@ -45,6 +52,7 @@ async function startServer() {
 
 function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  if (schedulerInterval) clearInterval(schedulerInterval);
   if (server) {
     server.close(() => {
       console.log('HTTP server closed.');

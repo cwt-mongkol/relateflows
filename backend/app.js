@@ -13,6 +13,7 @@ import { validate, stripSensitiveFields } from './validation.js';
 import { routeAuthorize } from './routePermissions.js';
 import { validateBody } from './schemas.js';
 import { processMessage, trainKnowledge, getSuggestedQuestions, getChatbotConfig, checkAutoReplyAvailable, DEFAULT_CHATBOT_CONFIG, handleQualificationStep, detectIntent } from './chatbot-agent.js';
+import { runWorkflows, summarizeTrigger, summarizeActions, VALID_TRIGGER_TYPES, VALID_ACTION_TYPES } from './automation.js';
 
 dotenv.config();
 
@@ -272,6 +273,55 @@ async function auditLog(userId, tenantId, action, targetType, targetId, details 
     );
   } catch (err) {
     console.error('Audit log error:', err.message);
+  }
+}
+
+// Helper: write a customer-facing activity/timeline entry, linked to an entity (deal/contact/lead/task)
+async function logActivity(tenantId, { type, title, description, user, targetName, entityType, entityId }) {
+  try {
+    const id = `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    await pool.query(
+      `INSERT INTO activities (id, type, title, description, timestamp, "user", target_name, entity_type, entity_id, tenant_id)
+       VALUES ($1, $2, $3, $4, 'Just now', $5, $6, $7, $8, $9)`,
+      [id, type, title, description || '', JSON.stringify(user || {}), targetName || '', entityType || '', entityId || '', tenantId || '']
+    );
+  } catch (err) {
+    console.error('logActivity error:', err.message);
+  }
+}
+
+// Helper: best-effort delivery of an outbound reply to the real social platform.
+// Failures never block persisting the message — this is degrade-gracefully, same as webhook signature checks.
+async function sendChannelMessage(channel, channelRow, externalContactId, content) {
+  if (!externalContactId) return { delivered: false, reason: 'No external contact id on file for this lead' };
+  try {
+    if (channel === 'line') {
+      const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+      if (!token) return { delivered: false, reason: 'LINE_CHANNEL_ACCESS_TOKEN not configured' };
+      const res = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: externalContactId, messages: [{ type: 'text', text: content }] }),
+      });
+      if (!res.ok) return { delivered: false, reason: `LINE API ${res.status}` };
+      return { delivered: true };
+    }
+    if (channel === 'facebook' || channel === 'instagram') {
+      let creds = {};
+      try { creds = JSON.parse(decrypt(channelRow.credentials)); } catch {}
+      const pageToken = creds.accessToken || '';
+      if (!pageToken) return { delivered: false, reason: 'No stored page access token for this channel' };
+      const res = await fetch(`https://graph.facebook.com/v22.0/me/messages?access_token=${encodeURIComponent(pageToken)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient: { id: externalContactId }, message: { text: content } }),
+      });
+      if (!res.ok) return { delivered: false, reason: `Graph API ${res.status}` };
+      return { delivered: true };
+    }
+    return { delivered: false, reason: `Unknown channel: ${channel}` };
+  } catch (err) {
+    return { delivered: false, reason: err.message };
   }
 }
 
@@ -1297,12 +1347,21 @@ app.post('/api/deals', async (req, res) => {
     `;
     
     const result = await pool.query(query, [
-      id, title, company, parseInt(value || 0, 10), stage, parseInt(probability || 0, 10), 
-      JSON.stringify(owner || {}), leadSource, priority, contactName, contactEmail, 
+      id, title, company, parseInt(value || 0, 10), stage, parseInt(probability || 0, 10),
+      JSON.stringify(owner || {}), leadSource, priority, contactName, contactEmail,
       createdAt, expectedCloseDate || '', notes, JSON.stringify(tags || []), tenantId
     ]);
-    
-    res.status(201).json(result.rows[0]);
+
+    const savedDeal = result.rows[0];
+    runWorkflows({
+      tenantId,
+      eventType: 'deal.created',
+      entityType: 'deal',
+      entityId: savedDeal.id,
+      payload: { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage, priority: savedDeal.priority, leadSource: savedDeal.leadSource },
+    }).catch((err) => console.error('runWorkflows (deal.created) error:', err.message));
+
+    res.status(201).json(savedDeal);
   } catch (err) {
     console.error('Error creating deal:', err);
     res.status(500).json({ error: 'Server error creating deal' });
@@ -1313,21 +1372,36 @@ app.patch('/api/deals/:id/stage', async (req, res) => {
   try {
     const { id } = req.params;
     const { stage, probability } = req.body;
-    
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+
     const query = `
-      UPDATE deals 
+      UPDATE deals
       SET stage = $1, probability = $2
       WHERE id = $3
       RETURNING id, title, company, value, stage, probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
     `;
-    
+
     const result = await pool.query(query, [stage, parseInt(probability, 10), id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Deal not found' });
     }
-    
-    res.json(result.rows[0]);
+
+    const savedDeal = result.rows[0];
+    const stageRes = await pool.query(
+      'SELECT is_closed_won AS "isClosedWon" FROM pipeline_stages WHERE tenant_id = $1 AND id = $2',
+      [tenantId, stage]
+    );
+    const isWon = stageRes.rows[0]?.isClosedWon === true;
+    runWorkflows({
+      tenantId,
+      eventType: isWon ? 'deal.won' : 'deal.stage_changed',
+      entityType: 'deal',
+      entityId: savedDeal.id,
+      payload: { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage, priority: savedDeal.priority, leadSource: savedDeal.leadSource },
+    }).catch((err) => console.error('runWorkflows (deal.stage) error:', err.message));
+
+    res.json(savedDeal);
   } catch (err) {
     console.error('Error updating deal stage:', err);
     res.status(500).json({ error: 'Server error updating deal stage' });
@@ -1442,14 +1516,23 @@ app.get('/api/companies', async (req, res) => {
 // 4. Activities
 app.get('/api/activities', async (req, res) => {
   try {
+    const { entityType, entityId } = req.query;
     const isSA = req.user.role_id === 1;
     const baseQuery = isSA
       ? `SELECT a.id, a.type, a.title, a.description, a.timestamp, a."user", a.target_name AS "targetName",
+               a.entity_type AS "entityType", a.entity_id AS "entityId",
                a.tenant_id AS "tenantId", tc.name AS "companyName"
         FROM activities a LEFT JOIN tenant_companies tc ON a.tenant_id = tc.id`
-      : `SELECT a.id, a.type, a.title, a.description, a.timestamp, a."user", a.target_name AS "targetName"
+      : `SELECT a.id, a.type, a.title, a.description, a.timestamp, a."user", a.target_name AS "targetName",
+               a.entity_type AS "entityType", a.entity_id AS "entityId"
         FROM activities a`;
-    const { text, params, limit } = keysetPaginate(baseQuery, [], req.query, {
+    const filterParams = [];
+    let filterClause = '';
+    if (entityType && entityId) {
+      filterParams.push(entityType, entityId);
+      filterClause = ` WHERE a.entity_type = $1 AND a.entity_id = $2`;
+    }
+    const { text, params, limit } = keysetPaginate(baseQuery + filterClause, filterParams, req.query, {
       orderBy: 'a.timestamp', tieBreaker: 'a.id', orderDir: 'DESC',
     });
     const result = await pool.query(text, params);
@@ -1466,21 +1549,21 @@ app.get('/api/activities', async (req, res) => {
 
 app.post('/api/activities', async (req, res) => {
   try {
-    const { type, title, description, user, targetName } = req.body;
+    const { type, title, description, user, targetName, entityType, entityId } = req.body;
     const id = `ACT-${Date.now()}`;
     const timestamp = 'Just now';
     const tenantId = req.tenantId || req.user?.tenant_id || '';
-    
+
     const query = `
-      INSERT INTO activities (id, type, title, description, timestamp, "user", target_name, tenant_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, type, title, description, timestamp, "user", target_name AS "targetName"
+      INSERT INTO activities (id, type, title, description, timestamp, "user", target_name, entity_type, entity_id, tenant_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, type, title, description, timestamp, "user", target_name AS "targetName", entity_type AS "entityType", entity_id AS "entityId"
     `;
-    
+
     const result = await pool.query(query, [
-      id, type, title, description, timestamp, JSON.stringify(user || {}), targetName || '', tenantId
+      id, type, title, description, timestamp, JSON.stringify(user || {}), targetName || '', entityType || '', entityId || '', tenantId
     ]);
-    
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating activity:', err);
@@ -1488,16 +1571,17 @@ app.post('/api/activities', async (req, res) => {
   }
 });
 
-// 5. Workflows
+// 5. Workflows (Automation Engine)
+const WORKFLOW_SELECT = `
+  id, title, description, trigger_cond AS "trigger", action, status,
+  trigger_type AS "triggerType", conditions, actions,
+  executions_count AS "executionsCount", last_executed AS "lastExecuted",
+  category, accent_color AS "accentColor"
+`;
+
 app.get('/api/workflows', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT id, title, description, trigger_cond AS "trigger", action, status, 
-             executions_count AS "executionsCount", last_executed AS "lastExecuted", 
-             category, accent_color AS "accentColor" 
-      FROM workflows 
-      ORDER BY id ASC
-    `);
+    const result = await pool.query(`SELECT ${WORKFLOW_SELECT} FROM workflows ORDER BY id ASC`);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching workflows:', err);
@@ -1505,22 +1589,33 @@ app.get('/api/workflows', async (req, res) => {
   }
 });
 
+app.get('/api/workflow-meta', async (_req, res) => {
+  res.json({ triggerTypes: VALID_TRIGGER_TYPES, actionTypes: VALID_ACTION_TYPES });
+});
+
 app.post('/api/workflows', async (req, res) => {
   try {
-    const { title, description, trigger, action, status, category, accentColor } = req.body;
+    const { title, description, triggerType, conditions, actions, status, category, accentColor } = req.body;
+    if (!triggerType || !VALID_TRIGGER_TYPES.includes(triggerType)) {
+      return res.status(400).json({ error: `triggerType must be one of: ${VALID_TRIGGER_TYPES.join(', ')}` });
+    }
+    const safeConditions = Array.isArray(conditions) ? conditions : [];
+    const safeActions = Array.isArray(actions) ? actions.filter((a) => VALID_ACTION_TYPES.includes(a?.type)) : [];
     const id = `WF-${Math.floor(100 + Math.random() * 900)}`;
     const tenantId = req.tenantId || req.user?.tenant_id || '';
-    
+
     const query = `
-      INSERT INTO workflows (id, title, description, trigger_cond, action, status, executions_count, last_executed, category, accent_color, tenant_id)
-      VALUES ($1, $2, $3, $4, $5, $6, 0, 'Never', $7, $8, $9)
-      RETURNING id, title, description, trigger_cond AS "trigger", action, status, executions_count AS "executionsCount", last_executed AS "lastExecuted", category, accent_color AS "accentColor"
+      INSERT INTO workflows (id, title, description, trigger_cond, action, status, executions_count, last_executed, category, accent_color, trigger_type, conditions, actions, tenant_id)
+      VALUES ($1, $2, $3, $4, $5, $6, 0, 'Never', $7, $8, $9, $10, $11, $12)
+      RETURNING ${WORKFLOW_SELECT}
     `;
-    
+
     const result = await pool.query(query, [
-      id, title, description, trigger, action, status || 'active', category, accentColor || '#2563EB', tenantId
+      id, title, description, summarizeTrigger(triggerType, safeConditions), summarizeActions(safeActions),
+      status || 'active', category, accentColor || '#2563EB', triggerType,
+      JSON.stringify(safeConditions), JSON.stringify(safeActions), tenantId,
     ]);
-    
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating workflow:', err);
@@ -1531,27 +1626,106 @@ app.post('/api/workflows', async (req, res) => {
 app.patch('/api/workflows/:id/toggle', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const checkWf = await pool.query('SELECT status FROM workflows WHERE id = $1', [id]);
     if (checkWf.rows.length === 0) {
       return res.status(404).json({ error: 'Workflow not found' });
     }
-    
+
     const currentStatus = checkWf.rows[0].status;
     const newStatus = currentStatus === 'active' ? 'paused' : 'active';
-    
+
     const query = `
-      UPDATE workflows 
+      UPDATE workflows
       SET status = $1
       WHERE id = $2
-      RETURNING id, title, description, trigger_cond AS "trigger", action, status, executions_count AS "executionsCount", last_executed AS "lastExecuted", category, accent_color AS "accentColor"
+      RETURNING ${WORKFLOW_SELECT}
     `;
-    
+
     const result = await pool.query(query, [newStatus, id]);
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error toggling workflow:', err);
     res.status(500).json({ error: 'Server error toggling workflow' });
+  }
+});
+
+app.delete('/api/workflows/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM workflows WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Workflow not found' });
+    res.json({ message: 'Workflow deleted' });
+  } catch (err) {
+    console.error('Error deleting workflow:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/workflows/:id/executions', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, event_type AS "eventType", status, actions_taken AS "actionsTaken", error_message AS "errorMessage",
+              entity_type AS "entityType", entity_id AS "entityId", created_at AS "createdAt"
+       FROM workflow_executions WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching workflow executions:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Notifications =====
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, type, title, body, entity_type AS "entityType", entity_id AS "entityId",
+              is_read AS "isRead", created_at AS "createdAt"
+       FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [req.user.sub]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching notifications:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/notifications/unread-count', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT COUNT(*)::int AS c FROM notifications WHERE user_id = $1 AND is_read = false',
+      [req.user.sub]
+    );
+    res.json({ count: result.rows[0].c });
+  } catch (err) {
+    console.error('Error counting notifications:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2 RETURNING id',
+      [req.params.id, req.user.sub]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Notification not found' });
+    res.json({ message: 'Marked as read' });
+  } catch (err) {
+    console.error('Error marking notification read:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/notifications/read-all', async (req, res) => {
+  try {
+    await pool.query('UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false', [req.user.sub]);
+    res.json({ message: 'All notifications marked as read' });
+  } catch (err) {
+    console.error('Error marking all notifications read:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -1616,7 +1790,17 @@ app.patch('/api/tasks/:id', async (req, res) => {
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Task not found' });
-    res.json(result.rows[0]);
+    const savedTask = result.rows[0];
+    if (status === 'done') {
+      runWorkflows({
+        tenantId: req.tenantId || req.user?.tenant_id || '',
+        eventType: 'task.completed',
+        entityType: 'task',
+        entityId: savedTask.id,
+        payload: { title: savedTask.title, priority: savedTask.priority },
+      }).catch((err) => console.error('runWorkflows (task.completed) error:', err.message));
+    }
+    res.json(savedTask);
   } catch (err) {
     console.error('Error updating task:', err);
     res.status(500).json({ error: 'Server error' });
@@ -1650,11 +1834,219 @@ app.get('/api/metrics', async (req, res) => {
   }
 });
 
-// ===== Stub endpoints (return empty arrays — frontend falls back to mock data) =====
-app.get('/api/stages', (req, res) => res.json([]));
-app.get('/api/leads', (req, res) => res.json([]));
-app.get('/api/chat-messages', (req, res) => res.json([]));
-app.get('/api/leads/allocations', (req, res) => res.json([]));
+// ===== Pipeline Stages =====
+app.get('/api/stages', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"
+       FROM pipeline_stages ORDER BY sort_order ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching stages:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/stages', async (req, res) => {
+  try {
+    const { id, label, color, isClosedWon, isClosedLost } = req.body;
+    if (!id || !label) return res.status(400).json({ error: 'id and label are required' });
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const maxOrder = await pool.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM pipeline_stages');
+    const result = await pool.query(
+      `INSERT INTO pipeline_stages (id, tenant_id, label, color, sort_order, is_closed_won, is_closed_lost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
+      [id, tenantId, label, color || '#94a3b8', maxOrder.rows[0].m + 1, !!isClosedWon, !!isClosedLost]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A stage with this id already exists' });
+    console.error('Error creating stage:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/stages/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { label, color, sortOrder } = req.body;
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+    if (label !== undefined) { setClauses.push(`label = $${idx++}`); values.push(label); }
+    if (color !== undefined) { setClauses.push(`color = $${idx++}`); values.push(color); }
+    if (sortOrder !== undefined) { setClauses.push(`sort_order = $${idx++}`); values.push(sortOrder); }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE pipeline_stages SET ${setClauses.join(', ')} WHERE id = $${idx}
+       RETURNING id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Stage not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating stage:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/stages/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inUse = await pool.query('SELECT COUNT(*)::int AS c FROM deals WHERE stage = $1', [id]);
+    if (inUse.rows[0].c > 0) {
+      return res.status(409).json({ error: `Cannot delete: ${inUse.rows[0].c} deal(s) are currently in this stage` });
+    }
+    const result = await pool.query('DELETE FROM pipeline_stages WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Stage not found' });
+    res.json({ message: 'Stage deleted' });
+  } catch (err) {
+    console.error('Error deleting stage:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Leads (Unified Inbox) =====
+app.get('/api/leads', async (req, res) => {
+  try {
+    const { text, params, limit } = keysetPaginate(
+      `SELECT l.id, l.name, l.avatar, l.channel, l.channel_id::text AS "socialAccountId",
+              l.external_contact_id AS "externalContactId", l.contact_id AS "contactId",
+              l.assigned_to AS "assignedTo", l.is_allocated AS "isAllocated", l.status,
+              l.lead_score AS "leadScore", l.last_message AS "lastMessage",
+              l.last_message_time AS "lastMessageTime", l.unread_count AS "unreadCount",
+              l.created_at AS "createdAt"
+       FROM leads l`,
+      [], req.query, { orderBy: 'l.last_message_time', tieBreaker: 'l.id', orderDir: 'DESC', defaultLimit: 50 }
+    );
+    const result = await pool.query(text, params);
+    if (req.query.cursor) {
+      const { items, nextCursor } = paginationResult(result.rows, limit, 'lastMessageTime', 'id');
+      return res.json({ items, nextCursor, hasMore: !!nextCursor });
+    }
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching leads:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/leads/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assignedTo, isAllocated, status, unreadCount } = req.body;
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+    if (assignedTo !== undefined) { setClauses.push(`assigned_to = $${idx++}`); values.push(assignedTo); }
+    if (isAllocated !== undefined) { setClauses.push(`is_allocated = $${idx++}`); values.push(!!isAllocated); }
+    if (status !== undefined) { setClauses.push(`status = $${idx++}`); values.push(status); }
+    if (unreadCount !== undefined) { setClauses.push(`unread_count = $${idx++}`); values.push(unreadCount); }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    setClauses.push(`updated_at = NOW()`);
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE leads SET ${setClauses.join(', ')} WHERE id = $${idx}
+       RETURNING id, name, avatar, channel, channel_id::text AS "socialAccountId", contact_id AS "contactId",
+                 assigned_to AS "assignedTo", is_allocated AS "isAllocated", status,
+                 lead_score AS "leadScore", last_message AS "lastMessage",
+                 last_message_time AS "lastMessageTime", unread_count AS "unreadCount", created_at AS "createdAt"`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating lead:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/leads/allocations', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, lead_id AS "leadId", sales_person_id AS "salesPersonId",
+              sales_person_name AS "salesPersonName", sales_person_avatar AS "salesPersonAvatar",
+              project_name AS "projectName", status, notes, is_reallocation AS "isReallocation",
+              created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM allocation_history ORDER BY created_at DESC LIMIT 500`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching allocations:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Chat Messages (Unified Inbox) =====
+app.get('/api/chat-messages', async (req, res) => {
+  try {
+    const { leadId } = req.query;
+    const params = [];
+    let clause = '';
+    if (leadId) { params.push(leadId); clause = ' WHERE lead_id = $1'; }
+    const result = await pool.query(
+      `SELECT id, lead_id AS "leadId", channel, direction,
+              CASE WHEN sender_type = 'agent' THEN 'agent' ELSE 'contact' END AS "from",
+              sender_name AS "senderName", sender_avatar AS "senderAvatar", content,
+              is_read AS "isRead", created_at AS "timestamp"
+       FROM messages${clause} ORDER BY created_at ASC LIMIT 1000`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching chat messages:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/chat-messages', async (req, res) => {
+  try {
+    const { leadId, content, senderName, senderAvatar } = req.body;
+    if (!leadId || !content || !String(content).trim()) {
+      return res.status(400).json({ error: 'leadId and content are required' });
+    }
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+
+    // tenant_id is qualified explicitly (l.tenant_id) because both leads and social_channels have a
+    // tenant_id column — the auto-scoping proxy in db.js would otherwise append an ambiguous bare
+    // "tenant_id" filter across this join.
+    const leadRes = await pool.query(
+      `SELECT l.channel, l.external_contact_id AS "externalContactId", l.channel_id AS "channelId", sc.credentials
+       FROM leads l LEFT JOIN social_channels sc ON l.channel_id = sc.id WHERE l.id = $1 AND l.tenant_id = $2`,
+      [leadId, tenantId]
+    );
+    if (leadRes.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
+    const lead = leadRes.rows[0];
+
+    const id = `MSG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const insertRes = await pool.query(
+      `INSERT INTO messages (id, tenant_id, lead_id, channel, direction, sender_type, sender_name, sender_avatar, content, is_read)
+       VALUES ($1, $2, $3, $4, 'outbound', 'agent', $5, $6, $7, true)
+       RETURNING id, lead_id AS "leadId", channel, 'agent' AS "from", sender_name AS "senderName",
+                 sender_avatar AS "senderAvatar", content, is_read AS "isRead", created_at AS "timestamp"`,
+      [id, tenantId, leadId, lead.channel, senderName || 'Agent', senderAvatar || '', content]
+    );
+
+    await pool.query(
+      `UPDATE leads SET last_message = $1, last_message_time = NOW(), updated_at = NOW() WHERE id = $2`,
+      [content, leadId]
+    );
+
+    // Best-effort real delivery — never blocks the response, message is already saved above
+    const delivery = await sendChannelMessage(lead.channel, { credentials: lead.credentials }, lead.externalContactId, content);
+    if (!delivery.delivered) {
+      console.warn(`Outbound message ${id} saved but not delivered to ${lead.channel}: ${delivery.reason}`);
+    }
+
+    res.status(201).json({ ...insertRes.rows[0], delivered: delivery.delivered });
+  } catch (err) {
+    console.error('Error sending chat message:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ===== RBAC: Users =====
 app.get('/api/users', authorize('settings_user_management:view_add_edit_deactivate_user'), async (req, res) => {
@@ -2347,25 +2739,107 @@ app.post('/api/webhook/:platform', async (req, res) => {
     }
   }
 
-  // Identify channel from payload
+  // Identify channel + sender + message content from payload, then persist as a real lead + message
   let channelId = null;
+  let tenantId = null;
+  let externalContactId = '';
+  let senderName = '';
+  let messageText = '';
+
   if (platform === 'facebook' || platform === 'instagram') {
-    const pageId = body?.entry?.[0]?.id || body?.entry?.[0]?.messaging?.[0]?.sender?.id || '';
+    const entry = body?.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    const pageId = entry?.id || '';
     if (pageId) {
-      const ch = await pool.query('SELECT id FROM social_channels WHERE page_id = $1', [pageId]);
-      if (ch.rows.length > 0) channelId = ch.rows[0].id;
+      const ch = await pool.query('SELECT id, tenant_id FROM social_channels WHERE page_id = $1', [pageId]);
+      if (ch.rows.length > 0) { channelId = ch.rows[0].id; tenantId = ch.rows[0].tenant_id; }
     }
+    externalContactId = messaging?.sender?.id || '';
+    messageText = messaging?.message?.text || '';
+    senderName = platform === 'instagram' ? 'Instagram User' : 'Facebook User';
   } else if (platform === 'line') {
-    const source = body?.events?.[0]?.source;
-    const groupOrRoomId = source?.groupId || source?.roomId || source?.userId || '';
-    if (groupOrRoomId) {
-      const ch = await pool.query('SELECT id FROM social_channels WHERE type = $1 LIMIT 1', ['line']);
-      if (ch.rows.length > 0) channelId = ch.rows[0].id;
+    const event = body?.events?.[0];
+    const source = event?.source;
+    externalContactId = source?.userId || source?.groupId || source?.roomId || '';
+    messageText = event?.message?.type === 'text' ? (event.message.text || '') : '';
+    senderName = 'LINE User';
+    if (externalContactId) {
+      const ch = await pool.query('SELECT id, tenant_id FROM social_channels WHERE type = $1 LIMIT 1', ['line']);
+      if (ch.rows.length > 0) { channelId = ch.rows[0].id; tenantId = ch.rows[0].tenant_id; }
     }
   }
-  if (channelId) {
-    console.log(`Webhook: ${platform} message for channel #${channelId}`);
+
+  if (channelId && tenantId && externalContactId && messageText) {
+    try {
+      // Best-effort friendlier display name from LINE profile API
+      if (platform === 'line' && process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+        try {
+          const profRes = await fetch(`https://api.line.me/v2/bot/profile/${externalContactId}`, {
+            headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+          });
+          if (profRes.ok) {
+            const prof = await profRes.json();
+            senderName = prof.displayName || senderName;
+          }
+        } catch {}
+      }
+
+      const existingLead = await pool.query(
+        'SELECT id FROM leads WHERE tenant_id = $1 AND channel_id = $2 AND external_contact_id = $3',
+        [tenantId, channelId, externalContactId]
+      );
+
+      let leadId;
+      let isNewLead = false;
+      if (existingLead.rows.length > 0) {
+        leadId = existingLead.rows[0].id;
+        await pool.query(
+          `UPDATE leads SET last_message = $1, last_message_time = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $2`,
+          [messageText, leadId]
+        );
+      } else {
+        isNewLead = true;
+        leadId = `LD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await pool.query(
+          `INSERT INTO leads (id, tenant_id, name, channel, channel_id, external_contact_id, last_message, last_message_time, unread_count, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 1, 'new')`,
+          [leadId, tenantId, senderName, platform, channelId, externalContactId, messageText]
+        );
+      }
+
+      const msgId = `MSG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      await pool.query(
+        `INSERT INTO messages (id, tenant_id, lead_id, channel, direction, sender_type, sender_name, content, raw_payload)
+         VALUES ($1, $2, $3, $4, 'inbound', 'contact', $5, $6, $7)`,
+        [msgId, tenantId, leadId, platform, senderName, messageText, JSON.stringify(body)]
+      );
+
+      await logActivity(tenantId, {
+        type: 'note',
+        title: 'New message received',
+        description: messageText.slice(0, 200),
+        user: { name: senderName, avatar: '' },
+        targetName: senderName,
+        entityType: 'lead',
+        entityId: leadId,
+      });
+
+      runWorkflows({
+        tenantId,
+        eventType: isNewLead ? 'lead.created' : 'lead.message_received',
+        entityType: 'lead',
+        entityId: leadId,
+        payload: { name: senderName, channel: platform, status: 'new', lastMessage: messageText },
+      }).catch((err) => console.error('runWorkflows (webhook) error:', err.message));
+
+      console.log(`Webhook: ${platform} message persisted for lead ${leadId}`);
+    } catch (err) {
+      console.error('Webhook persistence error:', err.message);
+    }
+  } else if (channelId) {
+    console.log(`Webhook: ${platform} event for channel #${channelId} had no usable text content — skipped`);
   }
+
   res.status(200).send('OK');
 });
 
@@ -2565,6 +3039,7 @@ app.post('/api/leads/:id/allocate', async (req, res) => {
     }
 
     // Create new allocation (either re-allocation or first-time)
+    const tenantIdForAlloc = req.tenantId || req.user?.tenant_id || '';
     const insertResult = await pool.query(
       `INSERT INTO allocation_history (lead_id, sales_person_id, sales_person_name, sales_person_avatar, project_name, notes, is_reallocation, tenant_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -2572,8 +3047,27 @@ app.post('/api/leads/:id/allocate', async (req, res) => {
          sales_person_name AS "salesPersonName", sales_person_avatar AS "salesPersonAvatar",
          project_name AS "projectName", status, notes, is_reallocation AS "isReallocation",
          created_at AS "createdAt", updated_at AS "updatedAt"`,
-      [leadId, salesPersonId, salesPersonName || '', salesPersonAvatar || '', projectName || null, notes || null, !!isReallocation, req.tenantId || req.user?.tenant_id || '']
+      [leadId, salesPersonId, salesPersonName || '', salesPersonAvatar || '', projectName || null, notes || null, !!isReallocation, tenantIdForAlloc]
     );
+
+    await pool.query('UPDATE leads SET assigned_to = $1, is_allocated = true, updated_at = NOW() WHERE id = $2', [salesPersonId, leadId]);
+    await logActivity(tenantIdForAlloc, {
+      type: 'stage_change',
+      title: isReallocation ? 'Lead Reallocated' : 'Lead Allocated',
+      description: `Allocated to ${salesPersonName || salesPersonId}${projectName ? ` for ${projectName}` : ''}.`,
+      user: { name: salesPersonName || 'System', avatar: salesPersonAvatar || '' },
+      targetName: salesPersonName || '',
+      entityType: 'lead',
+      entityId: leadId,
+    });
+
+    runWorkflows({
+      tenantId: tenantIdForAlloc,
+      eventType: 'lead.allocated',
+      entityType: 'lead',
+      entityId: leadId,
+      payload: { assignedTo: salesPersonId },
+    }).catch((err) => console.error('runWorkflows (allocate) error:', err.message));
 
     res.status(201).json(insertResult.rows[0]);
   } catch (err) {
