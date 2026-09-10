@@ -134,8 +134,11 @@ export function createApiV1Router() {
         [id, req.tenantId, name, channel]
       );
       const savedLead = result.rows[0];
-      runWorkflows({ tenantId: req.tenantId, eventType: 'lead.created', entityType: 'lead', entityId: savedLead.id, payload: { name, channel, status: 'new' } })
+      const eventPayload = { name, channel, status: 'new' };
+      runWorkflows({ tenantId: req.tenantId, eventType: 'lead.created', entityType: 'lead', entityId: savedLead.id, payload: eventPayload })
         .catch((err) => console.error('runWorkflows (api/v1 lead.created) error:', err.message));
+      dispatchWebhooks({ tenantId: req.tenantId, eventType: 'lead.created', entityType: 'lead', entityId: savedLead.id, payload: eventPayload })
+        .catch((err) => console.error('dispatchWebhooks (api/v1 lead.created) error:', err.message));
       res.status(201).json(savedLead);
     } catch (err) {
       console.error('API v1 POST /leads error:', err.message);
@@ -165,10 +168,19 @@ export function createApiV1Router() {
       const targetPipeline = pipelineId || (await pool.query(
         `SELECT id FROM pipelines WHERE tenant_id = $1 AND is_default = true LIMIT 1`, [req.tenantId]
       )).rows[0]?.id || 'sales';
-      const targetStage = stage || (await pool.query(
-        `SELECT id FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 ORDER BY sort_order ASC LIMIT 1`,
-        [req.tenantId, targetPipeline]
-      )).rows[0]?.id;
+      let targetStage = stage;
+      if (targetStage) {
+        const stageCheck = await pool.query(
+          'SELECT 1 FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 AND id = $3',
+          [req.tenantId, targetPipeline, targetStage]
+        );
+        if (stageCheck.rows.length === 0) return res.status(400).json({ error: `Stage "${targetStage}" does not belong to pipeline "${targetPipeline}"` });
+      } else {
+        targetStage = (await pool.query(
+          `SELECT id FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 ORDER BY sort_order ASC LIMIT 1`,
+          [req.tenantId, targetPipeline]
+        )).rows[0]?.id;
+      }
       if (!targetStage) return res.status(400).json({ error: 'No stage available in the target pipeline — create one first' });
       const id = `DEAL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const result = await pool.query(
@@ -178,8 +190,11 @@ export function createApiV1Router() {
         [id, title, company, parseInt(value || 0, 10), targetStage, targetPipeline, req.tenantId, new Date().toISOString().split('T')[0]]
       );
       const savedDeal = result.rows[0];
-      runWorkflows({ tenantId: req.tenantId, eventType: 'deal.created', entityType: 'deal', entityId: savedDeal.id, payload: { title, value: savedDeal.value, stage: savedDeal.stage } })
+      const eventPayload = { title, value: savedDeal.value, stage: savedDeal.stage };
+      runWorkflows({ tenantId: req.tenantId, eventType: 'deal.created', entityType: 'deal', entityId: savedDeal.id, payload: eventPayload })
         .catch((err) => console.error('runWorkflows (api/v1 deal.created) error:', err.message));
+      dispatchWebhooks({ tenantId: req.tenantId, eventType: 'deal.created', entityType: 'deal', entityId: savedDeal.id, payload: eventPayload })
+        .catch((err) => console.error('dispatchWebhooks (api/v1 deal.created) error:', err.message));
       res.status(201).json(savedDeal);
     } catch (err) {
       console.error('API v1 POST /deals error:', err.message);
