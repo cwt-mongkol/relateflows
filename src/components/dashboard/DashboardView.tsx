@@ -223,7 +223,7 @@ export const DashboardView: React.FC = () => {
                     <h5 className="text-xs font-bold text-slate-900 truncate pr-2">{wf.title}</h5>
                     <input
                       type="checkbox"
-                      checked={wf.status === 0}
+                      checked={wf.status === 'active'}
                       onChange={() => toggleWorkflowStatus(wf.id)}
                       className="toggle toggle-primary toggle-xs"
                     />

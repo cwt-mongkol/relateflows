@@ -4,6 +4,14 @@ import { useSettings } from '../../context/SettingsContext';
 import { MessageCircle, User, CheckCircle2, ArrowRight, Package, Plus, Edit3, Save, Trash2, ChevronDown, Tag, Zap, Settings2, X, Building2, FileText, Clock, History, BarChart3 } from 'lucide-react';
 import { TagManager } from './TagManager';
 import type { ProductFormData, ProductStatus, QuickReply, CrmUser } from '../../types/crm';
+import { classifyLeadScore } from '../../types/crm';
+
+const LEAD_SCORE_BADGE: Record<'hot' | 'warm' | 'cold', string> = {
+  hot: 'bg-rose-100 text-rose-700',
+  warm: 'bg-amber-100 text-amber-700',
+  cold: 'bg-slate-100 text-slate-500',
+};
+const LEAD_SCORE_ICON: Record<'hot' | 'warm' | 'cold', string> = { hot: '🔥', warm: '🟡', cold: '🔵' };
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
   facebook: (
@@ -293,7 +301,14 @@ export const InboxView: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-bold text-slate-900 truncate">{lead.name}</h4>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <h4 className="text-xs font-bold text-slate-900 truncate">{lead.name}</h4>
+                      {typeof lead.leadScore === 'number' && lead.leadScore > 0 && (
+                        <span className={`text-[8px] font-extrabold px-1 py-0.5 rounded shrink-0 ${LEAD_SCORE_BADGE[classifyLeadScore(lead.leadScore)]}`} title={`Lead score: ${lead.leadScore}`}>
+                          {LEAD_SCORE_ICON[classifyLeadScore(lead.leadScore)]} {lead.leadScore}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-[10px] text-slate-400 shrink-0">{lead.lastMessageTime}</span>
                   </div>
                   <p className="text-[11px] text-slate-500 truncate mt-0.5">{lead.lastMessage}</p>

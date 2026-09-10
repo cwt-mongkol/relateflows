@@ -46,6 +46,8 @@ const TENANT_SCOPED_TABLES = new Set([
   'sales_rep_allocation_status',
   'pipeline_stages', 'leads', 'messages',
   'workflow_executions', 'notifications',
+  'pipelines', 'lead_scoring_rules',
+  'webhook_subscriptions', 'webhook_deliveries', 'api_keys',
 ]);
 
 function scopeQuery(text, params, tenantId) {
@@ -540,6 +542,230 @@ async function applyMigrations(currentVersion) {
     }
     await pool.query('INSERT INTO schema_versions (version) VALUES (9)');
     console.log('Schema version 9 applied.');
+  }
+
+  if (currentVersion < 10) {
+    console.log('Applying schema version 10 (multiple pipelines)...');
+    const v10Statements = [
+      `CREATE TABLE IF NOT EXISTS pipelines (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          name VARCHAR(100) NOT NULL,
+          is_default BOOLEAN DEFAULT false,
+          sort_order INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_pipelines_tenant ON pipelines(tenant_id)`,
+      `ALTER TABLE pipeline_stages ADD COLUMN IF NOT EXISTS pipeline_id VARCHAR(50) NOT NULL DEFAULT 'sales'`,
+      `ALTER TABLE deals ADD COLUMN IF NOT EXISTS pipeline_id VARCHAR(50) NOT NULL DEFAULT 'sales'`,
+      `ALTER TABLE pipelines ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON pipelines`,
+      `CREATE POLICY tenant_isolation ON pipelines FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v10Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v10 migration warning:', err.message);
+      }
+    }
+
+    // Every tenant gets a default "Sales Pipeline" — existing pipeline_stages/deals already default to
+    // pipeline_id='sales' above, so this just makes that id resolvable before the FKs below are added.
+    try {
+      const tenants = await pool.query('SELECT id FROM tenant_companies');
+      for (const t of tenants.rows) {
+        await pool.query(
+          `INSERT INTO pipelines (id, tenant_id, name, is_default, sort_order) VALUES ('sales', $1, 'Sales Pipeline', true, 0) ON CONFLICT (tenant_id, id) DO NOTHING`,
+          [t.id]
+        );
+      }
+    } catch (err) {
+      console.warn('v10 pipeline seed warning:', err.message);
+    }
+
+    // Re-key pipeline_stages to (tenant_id, pipeline_id, id) now that stage ids are scoped per pipeline,
+    // and FK both pipeline_stages and deals to the now-populated pipelines table.
+    const v10bStatements = [
+      `ALTER TABLE pipeline_stages DROP CONSTRAINT IF EXISTS pipeline_stages_pkey`,
+      `ALTER TABLE pipeline_stages ADD PRIMARY KEY (tenant_id, pipeline_id, id)`,
+      `ALTER TABLE pipeline_stages DROP CONSTRAINT IF EXISTS fk_pipeline_stages_pipeline`,
+      `ALTER TABLE pipeline_stages ADD CONSTRAINT fk_pipeline_stages_pipeline FOREIGN KEY (tenant_id, pipeline_id) REFERENCES pipelines(tenant_id, id) ON DELETE CASCADE`,
+      `ALTER TABLE deals DROP CONSTRAINT IF EXISTS fk_deals_pipeline`,
+      `ALTER TABLE deals ADD CONSTRAINT fk_deals_pipeline FOREIGN KEY (tenant_id, pipeline_id) REFERENCES pipelines(tenant_id, id) ON DELETE RESTRICT`,
+    ];
+    for (const stmt of v10bStatements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v10b migration warning:', err.message);
+      }
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (10)');
+    console.log('Schema version 10 applied.');
+  }
+
+  if (currentVersion < 11) {
+    console.log('Applying schema version 11 (lead scoring rule engine)...');
+    const v11Statements = [
+      `CREATE TABLE IF NOT EXISTS lead_scoring_rules (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          label VARCHAR(150) NOT NULL,
+          event_type VARCHAR(50) NOT NULL,
+          points INTEGER NOT NULL,
+          conditions JSONB DEFAULT '[]',
+          status VARCHAR(20) DEFAULT 'active',
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_lead_scoring_rules_tenant ON lead_scoring_rules(tenant_id, event_type)`,
+      `ALTER TABLE lead_scoring_rules ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON lead_scoring_rules`,
+      `CREATE POLICY tenant_isolation ON lead_scoring_rules FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v11Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v11 migration warning:', err.message);
+      }
+    }
+
+    // Seed default scoring rules (mirrors the spec: open chat +10 / reply +15 / allocated +5) for every
+    // tenant that has none yet — a tenant that already added its own rules keeps them untouched.
+    const DEFAULT_RULES = [
+      { id: 'lead-created', label: 'New lead opened a chat', eventType: 'lead.created', points: 10 },
+      { id: 'lead-replied', label: 'Lead replied to a message', eventType: 'lead.message_received', points: 15 },
+      { id: 'lead-allocated', label: 'Lead allocated to a sales rep', eventType: 'lead.allocated', points: 5 },
+    ];
+    try {
+      const tenants = await pool.query('SELECT id FROM tenant_companies');
+      for (const t of tenants.rows) {
+        const existing = await pool.query('SELECT 1 FROM lead_scoring_rules WHERE tenant_id = $1 LIMIT 1', [t.id]);
+        if (existing.rows.length > 0) continue;
+        for (const r of DEFAULT_RULES) {
+          await pool.query(
+            `INSERT INTO lead_scoring_rules (id, tenant_id, label, event_type, points) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, id) DO NOTHING`,
+            [r.id, t.id, r.label, r.eventType, r.points]
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('v11 rule seed warning:', err.message);
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (11)');
+    console.log('Schema version 11 applied.');
+  }
+
+  if (currentVersion < 12) {
+    console.log('Applying schema version 12 (outbound webhooks)...');
+    const v12Statements = [
+      `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          name VARCHAR(150) NOT NULL,
+          event_type VARCHAR(50) NOT NULL,
+          target_url TEXT NOT NULL,
+          secret_encrypted TEXT DEFAULT '',
+          status VARCHAR(20) DEFAULT 'active',
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_subs_tenant ON webhook_subscriptions(tenant_id, event_type)`,
+      `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL,
+          subscription_id VARCHAR(50) NOT NULL,
+          event_type VARCHAR(50),
+          payload JSONB DEFAULT '{}',
+          status VARCHAR(20) DEFAULT 'pending',
+          attempt_count INTEGER DEFAULT 0,
+          last_status_code INTEGER,
+          last_error TEXT DEFAULT '',
+          next_retry_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_sub ON webhook_deliveries(tenant_id, subscription_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_retry ON webhook_deliveries(status, next_retry_at)`,
+      `ALTER TABLE webhook_subscriptions ENABLE ROW LEVEL SECURITY`,
+      `ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON webhook_subscriptions`,
+      `CREATE POLICY tenant_isolation ON webhook_subscriptions FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+      `DROP POLICY IF EXISTS tenant_isolation ON webhook_deliveries`,
+      `CREATE POLICY tenant_isolation ON webhook_deliveries FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v12Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v12 migration warning:', err.message);
+      }
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (12)');
+    console.log('Schema version 12 applied.');
+  }
+
+  if (currentVersion < 13) {
+    console.log('Applying schema version 13 (public API + API keys)...');
+    const v13Statements = [
+      `CREATE TABLE IF NOT EXISTS api_keys (
+          id VARCHAR(50) NOT NULL,
+          tenant_id VARCHAR(50) NOT NULL REFERENCES tenant_companies(id) ON DELETE CASCADE,
+          name VARCHAR(150) NOT NULL,
+          key_prefix VARCHAR(16) NOT NULL,
+          key_hash TEXT NOT NULL,
+          scopes JSONB DEFAULT '[]',
+          status VARCHAR(20) DEFAULT 'active',
+          last_used_at TIMESTAMP,
+          created_by VARCHAR(50),
+          created_at TIMESTAMP DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, id)
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id)`,
+      `ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY`,
+      `DROP POLICY IF EXISTS tenant_isolation ON api_keys`,
+      `CREATE POLICY tenant_isolation ON api_keys FOR ALL USING (tenant_id = current_setting('app.current_tenant_id')::varchar)`,
+    ];
+    for (const stmt of v13Statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        if (err.message?.includes('already exists')) continue;
+        console.warn('v13 migration warning:', err.message);
+      }
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (13)');
+    console.log('Schema version 13 applied.');
+  }
+
+  if (currentVersion < 14) {
+    console.log('Applying schema version 14 (permissions for webhooks + API keys)...');
+    try {
+      await pool.query(`
+        INSERT INTO permissions (module, action, label) VALUES
+            ('automation_webhooks', 'view', 'View Outbound Webhooks'),
+            ('automation_webhooks', 'manage', 'Create, Edit & Delete Outbound Webhooks'),
+            ('settings_developer', 'manage_api_keys', 'Manage Public API Keys')
+        ON CONFLICT (module, action) DO NOTHING
+      `);
+      // Super Admin + Administrator: full access. Manager: webhooks yes, API keys no (mirrors how
+      // settings_integrations_api_keys is withheld from Manager) — same shape as the init.sql seed.
+      await pool.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT 1, id FROM permissions WHERE module IN ('automation_webhooks', 'settings_developer') ON CONFLICT DO NOTHING`);
+      await pool.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT 2, id FROM permissions WHERE module IN ('automation_webhooks', 'settings_developer') ON CONFLICT DO NOTHING`);
+      await pool.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT 3, id FROM permissions WHERE module = 'automation_webhooks' ON CONFLICT DO NOTHING`);
+    } catch (err) {
+      console.warn('v14 migration warning:', err.message);
+    }
+    await pool.query('INSERT INTO schema_versions (version) VALUES (14)');
+    console.log('Schema version 14 applied.');
   }
 }
 

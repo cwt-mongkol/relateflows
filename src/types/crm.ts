@@ -2,8 +2,16 @@ export type DealStage = string;
 
 export type Priority = 'low' | 'medium' | 'high';
 
+export interface Pipeline {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  sortOrder: number;
+}
+
 export interface PipelineStage {
   id: string;
+  pipelineId: string;
   label: string;
   color: string;
   sortOrder?: number;
@@ -17,6 +25,7 @@ export interface Deal {
   company: string;
   value: number;
   stage: DealStage;
+  pipelineId: string;
   probability: number;
   owner: {
     name: string;
@@ -140,6 +149,55 @@ export interface AppNotification {
   entityId?: string;
   isRead: boolean;
   createdAt: string;
+}
+
+export type LeadClassification = 'hot' | 'warm' | 'cold';
+
+export function classifyLeadScore(score: number | undefined): LeadClassification {
+  const s = score ?? 0;
+  if (s >= 70) return 'hot';
+  if (s >= 40) return 'warm';
+  return 'cold';
+}
+
+export interface LeadScoringRule {
+  id: string;
+  label: string;
+  eventType: WorkflowTriggerType;
+  points: number;
+  conditions: WorkflowCondition[];
+  status: 'active' | 'paused';
+}
+
+export interface WebhookSubscription {
+  id: string;
+  name: string;
+  eventType: WorkflowTriggerType;
+  targetUrl: string;
+  status: 'active' | 'paused';
+  hasSecret: boolean;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  eventType: string;
+  status: 'pending' | 'success' | 'retrying' | 'failed';
+  attemptCount: number;
+  lastStatusCode: number | null;
+  lastError: string;
+  nextRetryAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  status: 'active' | 'revoked';
+  lastUsedAt: string | null;
+  createdAt: string;
+  key?: string; // only present once, in the create response
 }
 
 export interface Category {
@@ -392,7 +450,7 @@ export interface CustomRecord {
   updated_at: string;
 }
 
-export type SettingsTab = 'general' | 'users' | 'roles' | 'channels' | 'access' | 'integrations' | 'companies' | 'custom-objects' | 'chatbot' | 'cs-admin' | 'lead-allocation';
+export type SettingsTab = 'general' | 'users' | 'roles' | 'channels' | 'access' | 'integrations' | 'companies' | 'custom-objects' | 'chatbot' | 'cs-admin' | 'lead-allocation' | 'developer';
 
 export type NavView = 'dashboard' | 'inbox' | 'pipeline' | 'contacts' | 'workflows' | 'analytics' | 'calendar' | 'tasks' | 'settings' | 'cs-queue';
 

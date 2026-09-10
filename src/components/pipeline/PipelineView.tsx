@@ -30,14 +30,17 @@ const BADGE_COLORS: Record<string, string> = {
 };
 
 export const PipelineView: React.FC = () => {
-  const { isLoading, deals, stages, updateDealStage, deleteDeal, setIsAddDealModalOpen, setSelectedDeal, searchQuery } = useCRM();
+  const { isLoading, deals, stages, pipelines, selectedPipelineId, setSelectedPipelineId, updateDealStage, deleteDeal, setIsAddDealModalOpen, setSelectedDeal, searchQuery } = useCRM();
   const { t } = useSettings();
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'gantt'>('kanban');
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month');
 
+  const pipelineStages = stages.filter((s) => s.pipelineId === selectedPipelineId);
+
   const filteredDeals = deals.filter((deal) => {
+    if (deal.pipelineId !== selectedPipelineId) return false;
     if (priorityFilter !== 'all' && deal.priority !== priorityFilter) return false;
     if (searchQuery && !deal.title.toLowerCase().includes(searchQuery.toLowerCase()) && !deal.company.toLowerCase().includes(searchQuery.toLowerCase()) && !(deal.contactName || '').toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
@@ -65,7 +68,7 @@ export const PipelineView: React.FC = () => {
 
   const ganttOptions: ApexCharts.ApexOptions = useMemo(() => {
     const defaultColor = '#1D4ED8';
-    const sortedStages = stages;
+    const sortedStages = pipelineStages;
 
     const planData: { x: string; y: [number, number]; }[] = [];
     const actualData: { x: string; y: [number, number]; fillColor: string; }[] = [];
@@ -193,7 +196,7 @@ export const PipelineView: React.FC = () => {
               <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.company')}</span><span class="font-bold text-slate-900">${deal.company}</span></div>
               <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.value')}</span><span class="font-bold text-blue-600">$${deal.value.toLocaleString()}</span></div>
               <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.contact')}</span><span class="font-semibold text-slate-900">${deal.contactName}</span></div>
-              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.stage')}</span><span class="font-semibold text-slate-900">${stages.find(s => s.id === deal.stage)?.label || deal.stage}</span></div>
+              <div class="flex justify-between text-slate-600"><span>${t('pipeline.tooltip.stage')}</span><span class="font-semibold text-slate-900">${pipelineStages.find(s => s.id === deal.stage)?.label || deal.stage}</span></div>
             </div>` : ''}
           </div>`;
         },
@@ -215,7 +218,7 @@ export const PipelineView: React.FC = () => {
         { name: t('pipeline.actual'), data: actualData },
       ],
     };
-  }, [stages, filteredDeals, zoomLevel, setSelectedDeal]);
+  }, [pipelineStages, filteredDeals, zoomLevel, setSelectedDeal]);
 
   if (isLoading) {
     return (
@@ -242,6 +245,17 @@ export const PipelineView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Pipeline Switcher */}
+          {pipelines.length > 1 && (
+            <select
+              value={selectedPipelineId}
+              onChange={(e) => setSelectedPipelineId(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+
           {/* View Toggle */}
           <div className="bg-slate-100 rounded-xl p-1 flex items-center gap-0.5">
             <button
@@ -345,7 +359,7 @@ export const PipelineView: React.FC = () => {
       ) : (
         /* Kanban Board */
         <div className="flex gap-5 overflow-x-auto pb-4" style={{ minHeight: '600px' }}>
-          {stages.map((stage) => {
+          {pipelineStages.map((stage) => {
             const stageDeals = filteredDeals.filter((d) => d.stage === stage.id);
             const stageTotal = stageDeals.reduce((sum, d) => sum + d.value, 0);
 

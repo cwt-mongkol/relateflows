@@ -1,37 +1,46 @@
 import React, { useState } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import { X, Zap } from 'lucide-react';
+import type { WorkflowTriggerType, WorkflowActionType } from '../../types/crm';
+import { TRIGGER_TYPES, ACTION_TYPES } from '../../data/workflowMeta';
 
 export const AddWorkflowModal: React.FC = () => {
   const { isAddWorkflowModalOpen, setIsAddWorkflowModalOpen, addWorkflow } = useCRM();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [title, setTitle] = useState('');
-  const [trigger, setTrigger] = useState('Lead Score > 75');
-  const [action, setAction] = useState('Send Welcome Email + Notify AE');
+  const [triggerType, setTriggerType] = useState<WorkflowTriggerType>('lead.created');
+  const [actionType, setActionType] = useState<WorkflowActionType>('create_task');
+  const [actionValue, setActionValue] = useState('');
   const [category, setCategory] = useState<'Lead Nurturing' | 'Sales Operations' | 'Deal Routing' | 'Customer Success'>('Sales Operations');
   const [description, setDescription] = useState('');
 
   if (!isAddWorkflowModalOpen) return null;
 
+  const actionDef = ACTION_TYPES.find((a) => a.value === actionType)!;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !trigger || !action || isSubmitting) return;
+    if (!title || isSubmitting) return;
 
     setIsSubmitting(true);
-    await addWorkflow({
-      title,
-      description: description || `Automatically execute when ${trigger}.`,
-      trigger,
-      action,
-      status: 0,
-      category,
-      accentColor: '#1D4ED8'
-    });
-
-    setIsSubmitting(false);
-    setIsAddWorkflowModalOpen(false);
-    setTitle('');
+    try {
+      await addWorkflow({
+        title,
+        description: description || `Automatically runs when: ${TRIGGER_TYPES.find((t) => t.value === triggerType)?.label}.`,
+        status: 'active',
+        category,
+        accentColor: '#1D4ED8',
+        triggerType,
+        conditions: [],
+        actions: actionValue ? [{ type: actionType, params: { [actionDef.paramKey]: actionValue } }] : [],
+      });
+      setIsAddWorkflowModalOpen(false);
+      setTitle('');
+      setActionValue('');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -69,28 +78,36 @@ export const AddWorkflowModal: React.FC = () => {
             />
           </div>
 
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700">WHEN (Trigger) *</label>
+            <select
+              value={triggerType}
+              onChange={(e) => setTriggerType(e.target.value as WorkflowTriggerType)}
+              className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              {TRIGGER_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700">WHEN (Trigger condition) *</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Lead Score > 80"
-                value={trigger}
-                onChange={(e) => setTrigger(e.target.value)}
+              <label className="text-xs font-bold text-slate-700">THEN (Action)</label>
+              <select
+                value={actionType}
+                onChange={(e) => { setActionType(e.target.value as WorkflowActionType); setActionValue(''); }}
                 className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
+              >
+                {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </select>
             </div>
-
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700">THEN (Automated Action) *</label>
+              <label className="text-xs font-bold text-slate-700">{actionDef.paramLabel}</label>
               <input
                 type="text"
-                required
-                placeholder="e.g. Move to Stage: Qualified"
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                placeholder={actionDef.placeholder}
+                value={actionValue}
+                onChange={(e) => setActionValue(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>
           </div>
@@ -99,7 +116,7 @@ export const AddWorkflowModal: React.FC = () => {
             <label className="text-xs font-bold text-slate-700">Workflow Category</label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as any)}
+              onChange={(e) => setCategory(e.target.value as 'Lead Nurturing' | 'Sales Operations' | 'Deal Routing' | 'Customer Success')}
               className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
               <option value="Lead Nurturing">Lead Nurturing</option>

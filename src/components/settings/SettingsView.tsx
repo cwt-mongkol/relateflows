@@ -16,6 +16,7 @@ import { CustomObjectsManager } from './CustomObjectsManager';
 import { ChatbotSettings } from './ChatbotSettings';
 import { CsAdminSettings } from './CsAdminSettings';
 import { LeadAllocationSettings } from './LeadAllocationSettings';
+import { DeveloperSettings } from './DeveloperSettings';
 
 const TABS: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { key: 'general', label: 'General', icon: <Sliders className="w-3.5 h-3.5" /> },
@@ -29,11 +30,12 @@ const TABS: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { key: 'integrations', label: 'Integrations', icon: <Key className="w-3.5 h-3.5" /> },
   { key: 'companies', label: 'Companies', icon: <Building2 className="w-3.5 h-3.5" /> },
   { key: 'custom-objects', label: 'Custom Objects', icon: <Database className="w-3.5 h-3.5" /> },
+  { key: 'developer', label: 'Developer', icon: <Key className="w-3.5 h-3.5" /> },
 ];
 
 export const SettingsView: React.FC = () => {
   const { t, language, setLanguage, theme, setTheme, primaryColor, setPrimaryColor, accentColor, setAccentColor, saveSettings, savedSuccess } = useSettings();
-  const { stages, addStage, renameStage, deleteStage } = useCRM();
+  const { stages, addStage, renameStage, deleteStage, pipelines, selectedPipelineId, setSelectedPipelineId, addPipeline, setDefaultPipeline, deletePipeline } = useCRM();
   const { addToast } = useToast();
   const { canSettingsTab, roleName } = usePermissions();
   const visibleTabs = TABS.filter(t => canSettingsTab(t.key));
@@ -43,6 +45,34 @@ export const SettingsView: React.FC = () => {
   const [showNewStage, setShowNewStage] = useState(false);
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
+  const [showNewPipeline, setShowNewPipeline] = useState(false);
+  const [newPipelineName, setNewPipelineName] = useState('');
+
+  const pipelineStages = stages.filter((s) => s.pipelineId === selectedPipelineId);
+
+  const handleAddPipeline = async () => {
+    if (!newPipelineName.trim()) return;
+    const id = newPipelineName.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
+    try {
+      await addPipeline(id, newPipelineName.trim());
+      setSelectedPipelineId(id);
+      setNewPipelineName('');
+      setShowNewPipeline(false);
+    } catch (err) {
+      addToast('Could not create pipeline — id may already be in use.', 'error');
+      console.error(err);
+    }
+  };
+
+  const handleDeletePipeline = async (id: string) => {
+    try {
+      await deletePipeline(id);
+    } catch (err: any) {
+      let message = 'Could not delete pipeline — it may still have deals in it.';
+      try { message = JSON.parse(err?.message)?.error || message; } catch { /* not JSON, use default */ }
+      addToast(message, 'error');
+    }
+  };
 
   // Redirect if active tab is not visible
   useEffect(() => {
@@ -51,12 +81,12 @@ export const SettingsView: React.FC = () => {
     }
   }, [activeTab, visibleTabs, canSettingsTab]);
 
-  const usedColors = stages.map((s) => s.color);
+  const usedColors = pipelineStages.map((s) => s.color);
 
   const handleAddStage = () => {
     if (!newStageLabel.trim()) return;
     const id = newStageLabel.toLowerCase().replace(/\s+/g, '_');
-    addStage({ id, label: newStageLabel.trim(), color: newStageColor });
+    addStage({ id, pipelineId: selectedPipelineId, label: newStageLabel.trim(), color: newStageColor });
     setNewStageLabel('');
     setNewStageColor(STAGE_COLORS[0]);
     setShowNewStage(false);
@@ -191,16 +221,49 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Sales Pipeline Stages */}
+          {/* Pipelines + Stages */}
           <div className="md:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <div className="flex items-center gap-2 mb-5">
+            <div className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
                 <Kanban className="w-4 h-4" />
               </div>
-              <h4 className="text-sm font-extrabold text-slate-900">Sales Pipeline Stages</h4>
+              <h4 className="text-sm font-extrabold text-slate-900">Pipelines &amp; Stages</h4>
             </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 mb-5 pb-5 border-b border-slate-100">
+              {pipelines.map((p) => (
+                <div key={p.id} className={`group flex items-center gap-1 rounded-full pl-3 pr-1 py-1 text-xs font-bold border transition-all ${selectedPipelineId === p.id ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                  <button onClick={() => setSelectedPipelineId(p.id)} className="flex items-center gap-1">
+                    {p.name}{p.isDefault && <span className="text-[9px] opacity-70">★</span>}
+                  </button>
+                  {selectedPipelineId === p.id && (
+                    <div className="flex items-center gap-0.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {!p.isDefault && (
+                        <button title="Set as default" onClick={() => setDefaultPipeline(p.id)} className="p-1 rounded-full hover:bg-white/20"><CheckCircle2 className="w-3 h-3" /></button>
+                      )}
+                      {pipelines.length > 1 && (
+                        <button title="Delete pipeline" onClick={() => handleDeletePipeline(p.id)} className="p-1 rounded-full hover:bg-white/20"><X className="w-3 h-3" /></button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {showNewPipeline ? (
+                <div className="flex items-center gap-1">
+                  <input value={newPipelineName} onChange={(e) => setNewPipelineName(e.target.value)} placeholder="Pipeline name..." className="text-xs font-bold bg-white border border-indigo-300 rounded-full px-3 py-1.5 focus:outline-none w-40" autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddPipeline(); if (e.key === 'Escape') setShowNewPipeline(false); }} />
+                  <button onClick={handleAddPipeline} className="p-1.5 text-indigo-600 hover:text-indigo-800"><CheckCircle2 className="w-4 h-4" /></button>
+                  <button onClick={() => setShowNewPipeline(false)} className="p-1.5 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <button onClick={() => setShowNewPipeline(true)} className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold border-2 border-dashed border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 transition-all">
+                  <Plus className="w-3 h-3" /> New Pipeline
+                </button>
+              )}
+            </div>
+
             <div className="space-y-2.5">
-              {stages.map((stage) => (
+              {pipelineStages.map((stage) => (
                 <div key={stage.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 group">
                   <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: stage.color }} />
                   {editingStageId === stage.id ? (
@@ -269,6 +332,7 @@ export const SettingsView: React.FC = () => {
       {activeTab === 'roles' && <RoleManagement />}
       {activeTab === 'channels' && <ChannelManagement />}
       {activeTab === 'access' && <AccessControl />}
+      {activeTab === 'developer' && <DeveloperSettings />}
 
       {activeTab === 'integrations' && (
         <>

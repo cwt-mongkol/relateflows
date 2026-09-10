@@ -81,7 +81,7 @@ export const DealDetailModal: React.FC = () => {
                 onChange={(e) => updateDealStage(selectedDeal.id, e.target.value)}
                 className="text-sm font-extrabold text-blue-700 bg-transparent focus:outline-none cursor-pointer w-full"
               >
-                {stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                {stages.filter((s) => s.pipelineId === selectedDeal.pipelineId).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </div>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">

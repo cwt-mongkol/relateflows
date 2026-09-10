@@ -16,12 +16,12 @@ export const STAGE_COLORS = [
 ];
 
 export const INITIAL_STAGES: PipelineStage[] = [
-  { id: 'lead_in', label: 'Lead In', color: '#94a3b8' },
-  { id: 'contacted', label: 'Contacted', color: '#60a5fa' },
-  { id: 'proposal', label: 'Proposal', color: '#2563eb' },
-  { id: 'negotiation', label: 'Negotiation', color: '#f59e0b' },
-  { id: 'closed_won', label: 'Closed Won', color: '#10b981' },
-  { id: 'closed_lost', label: 'Closed Lost', color: '#fb7185' },
+  { id: 'lead_in', pipelineId: 'sales', label: 'Lead In', color: '#94a3b8' },
+  { id: 'contacted', pipelineId: 'sales', label: 'Contacted', color: '#60a5fa' },
+  { id: 'proposal', pipelineId: 'sales', label: 'Proposal', color: '#2563eb' },
+  { id: 'negotiation', pipelineId: 'sales', label: 'Negotiation', color: '#f59e0b' },
+  { id: 'closed_won', pipelineId: 'sales', label: 'Closed Won', color: '#10b981', isClosedWon: true },
+  { id: 'closed_lost', pipelineId: 'sales', label: 'Closed Lost', color: '#fb7185', isClosedLost: true },
 ];
 
 export const INITIAL_SOCIAL_ACCOUNTS: SocialAccount[] = [
@@ -156,6 +156,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Apex Global Logistics',
     value: 125000,
     stage: 'negotiation',
+    pipelineId: 'sales',
     probability: 85,
     owner: {
       name: 'Sarah Connor',
@@ -176,6 +177,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Nexus Dynamics',
     value: 48000,
     stage: 'proposal',
+    pipelineId: 'sales',
     probability: 60,
     owner: {
       name: 'Alex Rivera',
@@ -196,6 +198,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Vanguard Pay Solutions',
     value: 210000,
     stage: 'closed_won',
+    pipelineId: 'sales',
     probability: 100,
     owner: {
       name: 'Sarah Connor',
@@ -216,6 +219,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Starlight Retail Tech',
     value: 28000,
     stage: 'contacted',
+    pipelineId: 'sales',
     probability: 40,
     owner: {
       name: 'Marcus Brody',
@@ -236,6 +240,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Hyperion AI Labs',
     value: 95000,
     stage: 'lead_in',
+    pipelineId: 'sales',
     probability: 20,
     owner: {
       name: 'Alex Rivera',
@@ -256,6 +261,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Bluefin Tech Corp',
     value: 34000,
     stage: 'proposal',
+    pipelineId: 'sales',
     probability: 70,
     owner: {
       name: 'Marcus Brody',
@@ -276,6 +282,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'AeroJet Aviation Systems',
     value: 175000,
     stage: 'negotiation',
+    pipelineId: 'sales',
     probability: 90,
     owner: {
       name: 'Sarah Connor',
@@ -296,6 +303,7 @@ export const INITIAL_DEALS: Deal[] = [
     company: 'Quantum Media Group',
     value: 62000,
     stage: 'closed_lost',
+    pipelineId: 'sales',
     probability: 0,
     owner: {
       name: 'Alex Rivera',
@@ -508,7 +516,10 @@ export const INITIAL_WORKFLOWS: WorkflowRule[] = [
     description: 'When a contact lead score exceeds 80, automatically notify Senior Account Exec and move stage to Qualified.',
     trigger: 'Lead Score > 80',
     action: 'Assign Senior AE + Stage: Qualified',
-    status: 0,
+    status: 'active',
+    triggerType: 'lead.created',
+    conditions: [{ field: 'leadScore', operator: 'gte', value: 80 }],
+    actions: [{ type: 'assign_lead', params: {} }],
     executionsCount: 142,
     lastExecuted: '10 minutes ago',
     category: 'Lead Nurturing',
@@ -520,7 +531,10 @@ export const INITIAL_WORKFLOWS: WorkflowRule[] = [
     description: 'When a deal enters Closed Won, trigger Slack notification, generate contract PDF, and invite customer to Portal.',
     trigger: 'Deal Stage = Closed Won',
     action: 'Slack Alert + Customer Portal Invite',
-    status: 0,
+    status: 'active',
+    triggerType: 'deal.won',
+    conditions: [],
+    actions: [{ type: 'send_notification', params: { message: 'Deal closed won — kick off onboarding' } }],
     executionsCount: 89,
     lastExecuted: '2 hours ago',
     category: 'Sales Operations',
@@ -532,7 +546,10 @@ export const INITIAL_WORKFLOWS: WorkflowRule[] = [
     description: 'Send personalized quarterly executive check-in email to accounts with > $100k annual contract value.',
     trigger: 'Account Value > $100,000',
     action: 'Schedule Exec Email + CSM Notification',
-    status: 1,
+    status: 'paused',
+    triggerType: 'deal.created',
+    conditions: [{ field: 'value', operator: 'gte', value: 100000 }],
+    actions: [{ type: 'send_notification', params: { message: 'VIP account — schedule exec check-in' } }],
     executionsCount: 45,
     lastExecuted: 'Jul 10, 2026',
     category: 'Customer Success',

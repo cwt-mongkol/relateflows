@@ -1,6 +1,7 @@
 import app from './app.js';
 import { initDb, pool } from './db.js';
 import { runScheduledChecks } from './automation.js';
+import { processWebhookRetries } from './webhooks.js';
 
 const PORT = process.env.PORT || 5000;
 let server;
@@ -43,6 +44,7 @@ async function startServer() {
     });
     schedulerInterval = setInterval(() => {
       runScheduledChecks().catch((err) => console.error('Scheduled workflow check failed:', err.message));
+      processWebhookRetries().catch((err) => console.error('Webhook retry check failed:', err.message));
     }, SCHEDULER_INTERVAL_MS);
   } catch (err) {
     console.error('Failed to start server:', err);

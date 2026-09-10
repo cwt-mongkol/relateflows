@@ -4,6 +4,7 @@
 // runWorkflows(). This keeps execution single-pass and avoids cascading/looping automations (e.g. a
 // "move deal stage" action would otherwise be able to re-trigger a "deal.stage_changed" workflow).
 import pool from './db.js';
+import { evaluateConditions } from './conditions.js';
 
 const VALID_TRIGGER_TYPES = [
   'lead.created',
@@ -17,28 +18,6 @@ const VALID_TRIGGER_TYPES = [
 ];
 
 const VALID_ACTION_TYPES = ['create_task', 'send_notification', 'assign_lead', 'add_tag', 'move_deal_stage'];
-
-function evaluateCondition(payload, cond) {
-  const { field, operator, value } = cond || {};
-  if (!field) return true;
-  const actual = payload[field];
-  if (actual === undefined || actual === null) return false;
-  switch (operator) {
-    case 'eq': return String(actual) === String(value);
-    case 'neq': return String(actual) !== String(value);
-    case 'gt': return Number(actual) > Number(value);
-    case 'gte': return Number(actual) >= Number(value);
-    case 'lt': return Number(actual) < Number(value);
-    case 'lte': return Number(actual) <= Number(value);
-    case 'contains': return String(actual).toLowerCase().includes(String(value).toLowerCase());
-    default: return false;
-  }
-}
-
-function evaluateConditions(payload, conditions) {
-  if (!Array.isArray(conditions) || conditions.length === 0) return true;
-  return conditions.every((c) => evaluateCondition(payload, c));
-}
 
 async function getUserBrief(userId) {
   if (!userId) return { name: 'Unassigned', avatar: '' };
@@ -100,6 +79,19 @@ async function actionMoveDealStage(tenantId, entityType, entityId, _payload, par
   if (entityType !== 'deal') return { type: 'move_deal_stage', status: 'skipped', detail: 'Not a deal event' };
   const { stageId } = params || {};
   if (!stageId) return { type: 'move_deal_stage', status: 'skipped', detail: 'No stageId configured' };
+  // The target stage must belong to the deal's own pipeline — stage ids are only unique per
+  // (tenant, pipeline) since multiple pipelines shipped, so a saved workflow pointing at a stage from a
+  // different pipeline must no-op instead of silently moving the deal into an unrelated pipeline's column.
+  const dealRes = await pool.query('SELECT pipeline_id AS "pipelineId" FROM deals WHERE id = $1 AND tenant_id = $2', [entityId, tenantId]);
+  const pipelineId = dealRes.rows[0]?.pipelineId;
+  if (!pipelineId) return { type: 'move_deal_stage', status: 'skipped', detail: 'Deal not found' };
+  const stageRes = await pool.query(
+    'SELECT 1 FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 AND id = $3',
+    [tenantId, pipelineId, stageId]
+  );
+  if (stageRes.rows.length === 0) {
+    return { type: 'move_deal_stage', status: 'skipped', detail: `Stage "${stageId}" is not in this deal's pipeline` };
+  }
   await pool.query('UPDATE deals SET stage = $1 WHERE id = $2 AND tenant_id = $3', [stageId, entityId, tenantId]);
   return { type: 'move_deal_stage', status: 'done', detail: { stageId } };
 }

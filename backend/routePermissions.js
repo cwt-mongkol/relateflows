@@ -9,6 +9,12 @@ const RULES = [
   { methods: ['PATCH'], pattern: /^\/api\/stages\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
   { methods: ['DELETE'], pattern: /^\/api\/stages\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
 
+  // ── Pipelines (Multiple Pipelines) ──
+  { methods: ['GET'], pattern: /^\/api\/pipelines$/, permission: 'pipeline:view_deals' },
+  { methods: ['POST'], pattern: /^\/api\/pipelines$/, permission: 'pipeline:stage_crud_settings' },
+  { methods: ['PATCH'], pattern: /^\/api\/pipelines\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
+  { methods: ['DELETE'], pattern: /^\/api\/pipelines\/[^/]+$/, permission: 'pipeline:stage_crud_settings' },
+
   // ── Pipeline / Deals ──
   { methods: ['GET'], pattern: /^\/api\/deals$/, permission: 'pipeline:view_deals' },
   { methods: ['POST'], pattern: /^\/api\/deals$/, permission: 'pipeline:create_edit_deal' },
@@ -33,6 +39,26 @@ const RULES = [
   { methods: ['PATCH'], pattern: /^\/api\/workflows\/[^/]+\/toggle$/, permission: 'workflows:create_toggle_edit' },
   { methods: ['DELETE'], pattern: /^\/api\/workflows\/[^/]+$/, permission: 'workflows:create_toggle_edit' },
   { methods: ['GET'], pattern: /^\/api\/workflows\/[^/]+\/executions$/, permission: 'workflows:view' },
+
+  // ── Lead Scoring Rules ──
+  { methods: ['GET'], pattern: /^\/api\/lead-scoring-rules$/, permission: 'workflows:view' },
+  { methods: ['POST'], pattern: /^\/api\/lead-scoring-rules$/, permission: 'workflows:create_toggle_edit' },
+  { methods: ['PATCH'], pattern: /^\/api\/lead-scoring-rules\/[^/]+$/, permission: 'workflows:create_toggle_edit' },
+  { methods: ['DELETE'], pattern: /^\/api\/lead-scoring-rules\/[^/]+$/, permission: 'workflows:create_toggle_edit' },
+
+  // ── Outbound Webhooks ──
+  { methods: ['GET'], pattern: /^\/api\/webhooks$/, permission: 'automation_webhooks:view' },
+  { methods: ['POST'], pattern: /^\/api\/webhooks$/, permission: 'automation_webhooks:manage' },
+  { methods: ['PATCH'], pattern: /^\/api\/webhooks\/[^/]+$/, permission: 'automation_webhooks:manage' },
+  { methods: ['DELETE'], pattern: /^\/api\/webhooks\/[^/]+$/, permission: 'automation_webhooks:manage' },
+  { methods: ['GET'], pattern: /^\/api\/webhooks\/[^/]+\/deliveries$/, permission: 'automation_webhooks:view' },
+  { methods: ['POST'], pattern: /^\/api\/webhooks\/[^/]+\/deliveries\/[^/]+\/retry$/, permission: 'automation_webhooks:manage' },
+
+  // ── API Keys (Public API access) ──
+  { methods: ['GET'], pattern: /^\/api\/api-keys$/, permission: 'settings_developer:manage_api_keys' },
+  { methods: ['POST'], pattern: /^\/api\/api-keys$/, permission: 'settings_developer:manage_api_keys' },
+  { methods: ['PATCH'], pattern: /^\/api\/api-keys\/[^/]+$/, permission: 'settings_developer:manage_api_keys' },
+  { methods: ['DELETE'], pattern: /^\/api\/api-keys\/[^/]+$/, permission: 'settings_developer:manage_api_keys' },
 
   // ── Calendar ──
   { methods: ['GET'], pattern: /^\/api\/calendar\/events$/, permission: 'calendar:view_create_appointment' },

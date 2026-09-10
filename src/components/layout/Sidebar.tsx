@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileMenuOpen, setMobileMenuO
       id: 'workflows',
       label: t('sidebar.workflows'),
       icon: <Zap className="w-5 h-5" />,
-      badge: workflows.filter((w) => w.status === 0).length
+      badge: workflows.filter((w) => w.status === 'active').length
     },
     {
       id: 'tasks',

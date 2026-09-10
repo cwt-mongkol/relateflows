@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCRM } from '../../context/CRMContext';
 import type { Priority } from '../../types/crm';
 import { X, TrendingUp, Plus } from 'lucide-react';
 
 export const AddDealModal: React.FC = () => {
-  const { isAddDealModalOpen, setIsAddDealModalOpen, addDeal, stages } = useCRM();
+  const { isAddDealModalOpen, setIsAddDealModalOpen, addDeal, stages, selectedPipelineId } = useCRM();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -18,6 +18,17 @@ export const AddDealModal: React.FC = () => {
   const [leadSource, setLeadSource] = useState('Inbound Website');
   const [notes, setNotes] = useState('');
 
+  const openStages = stages.filter((s) => s.pipelineId === selectedPipelineId && !s.isClosedWon && !s.isClosedLost);
+
+  // Keep the selected stage valid for whichever pipeline is currently active — stage ids aren't shared
+  // across pipelines, so switching pipelines while this modal is open must reset the selection.
+  useEffect(() => {
+    if (isAddDealModalOpen && !openStages.some((s) => s.id === stage) && openStages[0]) {
+      setStage(openStages[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAddDealModalOpen, selectedPipelineId, stages]);
+
   if (!isAddDealModalOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,6 +41,7 @@ export const AddDealModal: React.FC = () => {
       company,
       value: Number(value),
       stage,
+      pipelineId: selectedPipelineId,
       probability: Number(probability),
       owner: {
         name: 'Sarah Connor',
@@ -121,7 +133,7 @@ export const AddDealModal: React.FC = () => {
                 onChange={(e) => setStage(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-800 transition-all shadow-xs cursor-pointer"
               >
-                {stages.filter((s) => !s.id.startsWith('closed')).map((s) => (
+                {openStages.map((s) => (
                   <option key={s.id} value={s.id}>{s.label}</option>
                 ))}
               </select>

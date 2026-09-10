@@ -25,6 +25,11 @@ import type {
   AllocationRecord,
   AppNotification,
   WorkflowExecution,
+  Pipeline,
+  LeadScoringRule,
+  WebhookSubscription,
+  WebhookDelivery,
+  ApiKey,
 } from '../types/crm';
 import { 
   INITIAL_DEALS, 
@@ -87,6 +92,30 @@ interface CRMContextType {
   addStage: (stage: PipelineStage) => Promise<void>;
   renameStage: (id: string, label: string) => Promise<void>;
   deleteStage: (id: string) => Promise<void>;
+
+  pipelines: Pipeline[];
+  selectedPipelineId: string;
+  setSelectedPipelineId: (id: string) => void;
+  addPipeline: (id: string, name: string) => Promise<void>;
+  renamePipeline: (id: string, name: string) => Promise<void>;
+  setDefaultPipeline: (id: string) => Promise<void>;
+  deletePipeline: (id: string) => Promise<void>;
+
+  leadScoringRules: LeadScoringRule[];
+  addLeadScoringRule: (rule: Omit<LeadScoringRule, 'id' | 'conditions'>) => Promise<void>;
+  toggleLeadScoringRule: (id: string) => Promise<void>;
+  deleteLeadScoringRule: (id: string) => Promise<void>;
+
+  webhooks: WebhookSubscription[];
+  addWebhook: (webhook: { name: string; eventType: string; targetUrl: string; secret?: string }) => Promise<void>;
+  toggleWebhook: (id: string) => Promise<void>;
+  deleteWebhook: (id: string) => Promise<void>;
+  getWebhookDeliveries: (webhookId: string) => Promise<WebhookDelivery[]>;
+  retryWebhookDelivery: (webhookId: string, deliveryId: string) => Promise<void>;
+
+  apiKeys: ApiKey[];
+  createApiKey: (name: string, scopes: string[]) => Promise<ApiKey>;
+  revokeApiKey: (id: string) => Promise<void>;
 
   leads: Lead[];
   chatMessages: ChatMessage[];
@@ -160,6 +189,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Pipeline stages — real, tenant-shared data from /api/stages (loaded below), mock data until then
   const [stages, setStages] = useState<PipelineStage[]>(INITIAL_STAGES);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string>('sales');
+  const [leadScoringRules, setLeadScoringRules] = useState<LeadScoringRule[]>([]);
+  const [webhooks, setWebhooks] = useState<WebhookSubscription[]>([]);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [isAddDealModalOpen, setIsAddDealModalOpen] = useState(false);
@@ -173,7 +207,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
 
-        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData, channelsData] = await Promise.all([
+        const [dealsData, contactsData, companiesData, activitiesData, workflowsData, metricsData, stagesData,           leadsData, chatData, productsData, categoriesData, appointmentsData, tasksData, tagsData, allocData, channelsData, pipelinesData, leadScoringData, webhooksData, apiKeysData] = await Promise.all([
           api.get<Deal[]>('/api/deals').catch(() => null),
           api.get<Contact[]>('/api/contacts').catch(() => null),
           api.get<CompanyAccount[]>('/api/companies').catch(() => null),
@@ -190,12 +224,17 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           api.get<CustomerTag[]>('/api/tags').catch(() => null),
           api.get<AllocationRecord[]>('/api/leads/allocations').catch(() => null),
           api.get<{ id: number; type: string; displayName: string; status: string }[]>('/api/inbox/channels').catch(() => null),
+          api.get<Pipeline[]>('/api/pipelines').catch(() => null),
+          api.get<LeadScoringRule[]>('/api/lead-scoring-rules').catch(() => null),
+          api.get<WebhookSubscription[]>('/api/webhooks').catch(() => null),
+          api.get<ApiKey[]>('/api/api-keys').catch(() => null),
         ]) as [
           Deal[] | null, Contact[] | null, CompanyAccount[] | null, Activity[] | null,
           WorkflowRule[] | null, MetricCardData[] | null, PipelineStage[] | null,
           Lead[] | null, ChatMessage[] | null, Product[] | null, Category[] | null,
           Appointment[] | null, Task[] | null, CustomerTag[] | null, AllocationRecord[] | null,
-          { id: number; type: string; displayName: string; status: string }[] | null
+          { id: number; type: string; displayName: string; status: string }[] | null,
+          Pipeline[] | null, LeadScoringRule[] | null, WebhookSubscription[] | null, ApiKey[] | null
         ];
 
         // Use API data if available and non-empty, otherwise fall back to mock data
@@ -224,6 +263,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             connected: c.status === 'connected',
           })));
         }
+        if (pipelinesData && pipelinesData.length > 0) {
+          setPipelines(pipelinesData);
+          setSelectedPipelineId(pipelinesData.find((p) => p.isDefault)?.id || pipelinesData[0].id);
+        }
+        setLeadScoringRules(leadScoringData || []);
+        setWebhooks(webhooksData || []);
+        setApiKeys(apiKeysData || []);
       } catch (err) {
         console.warn('Failed to load data, using mock data:', err);
       }
@@ -306,9 +352,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateDealStage = async (dealId: string, newStage: DealStage) => {
-    const stageLabel = stages.find(s => s.id === newStage)?.label || newStage;
     const targetDeal = deals.find(d => d.id === dealId);
-    const newProbability = newStage === 'closed_won' ? 100 : newStage === 'closed_lost' ? 0 : (targetDeal ? targetDeal.probability : 50);
+    // Look up won/lost from the stage's own flags rather than a hardcoded id — stage ids are only
+    // "closed_won"/"closed_lost" in the default pipeline; other pipelines can name them anything.
+    const targetStage = stages.find(s => s.id === newStage && s.pipelineId === targetDeal?.pipelineId);
+    const stageLabel = targetStage?.label || newStage;
+    const newProbability = targetStage?.isClosedWon ? 100 : targetStage?.isClosedLost ? 0 : (targetDeal ? targetDeal.probability : 50);
+    const isWon = !!targetStage?.isClosedWon;
 
     try {
       const updatedDeal = await api.patch<any>(`/api/deals/${dealId}/stage`, { stage: newStage, probability: newProbability });
@@ -316,8 +366,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Create activity
       const newActData = {
-        type: newStage === 'closed_won' ? 'deal_won' : 'stage_change',
-        title: newStage === 'closed_won' ? 'Deal Closed Won!' : 'Stage Updated',
+        type: isWon ? 'deal_won' : 'stage_change',
+        title: isWon ? 'Deal Closed Won!' : 'Stage Updated',
         description: `Moved "${updatedDeal.title}" to ${stageLabel}.`,
         user: {
           name: 'You (Current User)',
@@ -346,8 +396,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           const newActivity: Activity = {
             id: `ACT-${Date.now()}`,
-            type: newStage === 'closed_won' ? 'deal_won' : 'stage_change',
-            title: newStage === 'closed_won' ? 'Deal Closed Won!' : 'Stage Updated',
+            type: isWon ? 'deal_won' : 'stage_change',
+            title: isWon ? 'Deal Closed Won!' : 'Stage Updated',
             description: `Moved "${deal.title}" to ${stageLabel}.`,
             timestamp: 'Just now',
             user: {
@@ -627,6 +677,87 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const addPipeline = async (id: string, name: string) => {
+    const saved = await api.post<Pipeline>('/api/pipelines', { id, name });
+    setPipelines((prev) => [...prev, saved]);
+  };
+
+  const renamePipeline = async (id: string, name: string) => {
+    const updated = await api.patch<Pipeline>(`/api/pipelines/${id}`, { name });
+    setPipelines((prev) => prev.map((p) => p.id === id ? updated : p));
+  };
+
+  const setDefaultPipeline = async (id: string) => {
+    const updated = await api.patch<Pipeline>(`/api/pipelines/${id}`, { isDefault: true });
+    setPipelines((prev) => prev.map((p) => ({ ...p, isDefault: p.id === updated.id })));
+  };
+
+  const deletePipeline = async (id: string) => {
+    await api.delete(`/api/pipelines/${id}`);
+    setPipelines((prev) => prev.filter((p) => p.id !== id));
+    if (selectedPipelineId === id) {
+      setSelectedPipelineId((prev) => pipelines.find((p) => p.id !== id)?.id || prev);
+    }
+  };
+
+  const addLeadScoringRule = async (rule: Omit<LeadScoringRule, 'id' | 'conditions'>) => {
+    const saved = await api.post<LeadScoringRule>('/api/lead-scoring-rules', rule);
+    setLeadScoringRules((prev) => [...prev, saved]);
+  };
+
+  const toggleLeadScoringRule = async (id: string) => {
+    const rule = leadScoringRules.find((r) => r.id === id);
+    if (!rule) return;
+    const updated = await api.patch<LeadScoringRule>(`/api/lead-scoring-rules/${id}`, { status: rule.status === 'active' ? 'paused' : 'active' });
+    setLeadScoringRules((prev) => prev.map((r) => r.id === id ? updated : r));
+  };
+
+  const deleteLeadScoringRule = async (id: string) => {
+    await api.delete(`/api/lead-scoring-rules/${id}`);
+    setLeadScoringRules((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const addWebhook = async (webhook: { name: string; eventType: string; targetUrl: string; secret?: string }) => {
+    const saved = await api.post<WebhookSubscription>('/api/webhooks', webhook);
+    setWebhooks((prev) => [...prev, saved]);
+  };
+
+  const toggleWebhook = async (id: string) => {
+    const wh = webhooks.find((w) => w.id === id);
+    if (!wh) return;
+    const updated = await api.patch<WebhookSubscription>(`/api/webhooks/${id}`, { status: wh.status === 'active' ? 'paused' : 'active' });
+    setWebhooks((prev) => prev.map((w) => w.id === id ? updated : w));
+  };
+
+  const deleteWebhook = async (id: string) => {
+    await api.delete(`/api/webhooks/${id}`);
+    setWebhooks((prev) => prev.filter((w) => w.id !== id));
+  };
+
+  const getWebhookDeliveries = async (webhookId: string): Promise<WebhookDelivery[]> => {
+    try {
+      return await api.get<WebhookDelivery[]>(`/api/webhooks/${webhookId}/deliveries`);
+    } catch (err) {
+      console.warn('API failed for getWebhookDeliveries.', err);
+      return [];
+    }
+  };
+
+  const retryWebhookDelivery = async (webhookId: string, deliveryId: string) => {
+    await api.post(`/api/webhooks/${webhookId}/deliveries/${deliveryId}/retry`, {});
+  };
+
+  const createApiKey = async (name: string, scopes: string[]): Promise<ApiKey> => {
+    const saved = await api.post<ApiKey>('/api/api-keys', { name, scopes });
+    setApiKeys((prev) => [{ ...saved, key: undefined }, ...prev]);
+    return saved; // includes the one-time-only raw `key` field for the caller to display
+  };
+
+  const revokeApiKey = async (id: string) => {
+    await api.delete(`/api/api-keys/${id}`);
+    setApiKeys((prev) => prev.filter((k) => k.id !== id));
+  };
+
   const sendChatMessage = async (leadId: string, content: string) => {
     const trimmed = content.trim();
     if (!trimmed) return;
@@ -872,6 +1003,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addStage,
         renameStage,
         deleteStage,
+        pipelines,
+        selectedPipelineId,
+        setSelectedPipelineId,
+        addPipeline,
+        renamePipeline,
+        setDefaultPipeline,
+        deletePipeline,
+        leadScoringRules,
+        addLeadScoringRule,
+        toggleLeadScoringRule,
+        deleteLeadScoringRule,
+        webhooks,
+        addWebhook,
+        toggleWebhook,
+        deleteWebhook,
+        getWebhookDeliveries,
+        retryWebhookDelivery,
+        apiKeys,
+        createApiKey,
+        revokeApiKey,
         addTag,
         updateTag,
         deleteTag,

@@ -28,6 +28,7 @@ const SETTINGS_TAB_ACCESS: Record<SettingsTab, RoleId[]> = {
   chatbot: [1, 2, 3, 4, 5],
   'cs-admin': [1, 2, 4],
   'lead-allocation': [1, 2, 3, 4],
+  developer: [1, 2],
 };
 
 const PERMISSION_MAP: Record<string, RoleId[]> = {

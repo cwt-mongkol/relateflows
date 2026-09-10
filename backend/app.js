@@ -14,36 +14,14 @@ import { routeAuthorize } from './routePermissions.js';
 import { validateBody } from './schemas.js';
 import { processMessage, trainKnowledge, getSuggestedQuestions, getChatbotConfig, checkAutoReplyAvailable, DEFAULT_CHATBOT_CONFIG, handleQualificationStep, detectIntent } from './chatbot-agent.js';
 import { runWorkflows, summarizeTrigger, summarizeActions, VALID_TRIGGER_TYPES, VALID_ACTION_TYPES } from './automation.js';
+import { applyLeadScoring } from './leadScoring.js';
+import { dispatchWebhooks, retryDelivery } from './webhooks.js';
+import { encrypt, decrypt } from './crypto.js';
+import { createApiV1Router } from './apiV1.js';
 
 dotenv.config();
 
 // Schema is managed via init.sql + migration system in db.js
-
-// ===== Encryption for stored credentials =====
-if (!process.env.ENCRYPTION_KEY) {
-  console.error('FATAL: ENCRYPTION_KEY must be set in production. All encrypted data will be unrecoverable without it.');
-  if (process.env.NODE_ENV === 'production') process.exit(1);
-}
-const ENCRYPTION_KEY = crypto.createHash('sha256').update(process.env.ENCRYPTION_KEY || 'fallback-dev-only').digest();
-const ALGORITHM = 'aes-256-cbc';
-
-function encrypt(text) {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
-}
-
-function decrypt(encryptedText) {
-  const parts = encryptedText.split(':');
-  const iv = Buffer.from(parts.shift(), 'hex');
-  const encrypted = parts.join(':');
-  const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -132,28 +110,35 @@ app.use('/api/channels', rateLimit(30, 60000));
 app.use('/api/users', rateLimit(30, 60000));
 app.use('/api/roles', rateLimit(30, 60000));
 
-// Global auth + tenant scoping for all /api routes (except auth, webhook, oauth callbacks)
+// Global auth + tenant scoping for all /api routes (except auth, webhook, oauth callbacks, and the
+// API-key-authenticated public /api/v1/* router, which does its own auth + tenant scoping — see apiV1.js)
+function isUnscopedApiPath(path) {
+  return path.startsWith('/auth/') || path.startsWith('/webhook/') || path.startsWith('/v1/') || path.includes('/callback');
+}
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path.startsWith('/webhook/') || req.path.includes('/callback')) return next();
+  if (isUnscopedApiPath(req.path)) return next();
   authenticateToken(req, res, next);
 });
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path.startsWith('/webhook/') || req.path.includes('/callback')) return next();
+  if (isUnscopedApiPath(req.path)) return next();
   loadUserPermissions(req, res, next);
 });
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path.startsWith('/webhook/') || req.path.includes('/callback')) return next();
+  if (isUnscopedApiPath(req.path)) return next();
   routeAuthorize(req, res, next);
 });
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path.startsWith('/webhook/') || req.path.includes('/callback')) return next();
+  if (isUnscopedApiPath(req.path)) return next();
   if (['POST', 'PATCH', 'PUT'].includes(req.method)) validateBody(req, res, next);
   else next();
 });
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path.startsWith('/webhook/') || req.path.includes('/callback')) return next();
+  if (isUnscopedApiPath(req.path)) return next();
   scopeToTenant(req, res, next);
 });
+
+// Public API — API-key auth, its own rate limiting and tenant scoping (see apiV1.js)
+app.use('/api/v1', createApiV1Router());
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const REFRESH_JWT_SECRET = process.env.REFRESH_JWT_SECRET || process.env.JWT_SECRET;
@@ -827,6 +812,12 @@ app.post('/api/admin/tenants', authenticateToken, requireSuperAdmin, async (req,
       [tenantId]
     );
 
+    // 6. Create the default Sales Pipeline (deals/pipeline_stages default pipeline_id='sales')
+    await client.query(
+      `INSERT INTO pipelines (id, tenant_id, name, is_default, sort_order) VALUES ('sales', $1, 'Sales Pipeline', true, 0) ON CONFLICT DO NOTHING`,
+      [tenantId]
+    );
+
     await client.query('COMMIT');
     res.status(201).json({ id: tenantId, name, slug, domain: domain || '', status: 'active' });
   } catch (err) {
@@ -1303,13 +1294,13 @@ app.get('/api/deals', async (req, res) => {
   try {
     const isSA = req.user.role_id === 1;
     const baseQuery = isSA
-      ? `SELECT d.id, d.title, d.company, d.value, d.stage, d.probability, d.owner,
+      ? `SELECT d.id, d.title, d.company, d.value, d.stage, d.pipeline_id AS "pipelineId", d.probability, d.owner,
                d.lead_source AS "leadSource", d.priority, d.contact_name AS "contactName",
                d.contact_email AS "contactEmail", d.created_at AS "createdAt",
                d.expected_close_date AS "expectedCloseDate", d.notes, d.tags,
                d.tenant_id AS "tenantId", tc.name AS "companyName"
         FROM deals d LEFT JOIN tenant_companies tc ON d.tenant_id = tc.id`
-      : `SELECT d.id, d.title, d.company, d.value, d.stage, d.probability, d.owner,
+      : `SELECT d.id, d.title, d.company, d.value, d.stage, d.pipeline_id AS "pipelineId", d.probability, d.owner,
                d.lead_source AS "leadSource", d.priority, d.contact_name AS "contactName",
                d.contact_email AS "contactEmail", d.created_at AS "createdAt",
                d.expected_close_date AS "expectedCloseDate", d.notes, d.tags
@@ -1331,23 +1322,39 @@ app.get('/api/deals', async (req, res) => {
 
 app.post('/api/deals', async (req, res) => {
   try {
-    const { 
-      title, company, value, stage, probability, owner, 
-      leadSource, priority, contactName, contactEmail, notes, tags, expectedCloseDate 
+    const {
+      title, company, value, stage, probability, owner,
+      leadSource, priority, contactName, contactEmail, notes, tags, expectedCloseDate, pipelineId,
     } = req.body;
-    
+
     const id = `DEAL-${Math.floor(100 + Math.random() * 900)}`;
     const createdAt = new Date().toISOString().split('T')[0];
     const tenantId = req.tenantId || req.user?.tenant_id || '';
-    
+
+    // Default to the tenant's default pipeline when not specified; validate the stage belongs to it.
+    let targetPipelineId = pipelineId;
+    if (!targetPipelineId) {
+      const defaultPipeline = await pool.query('SELECT id FROM pipelines WHERE tenant_id = $1 AND is_default = true LIMIT 1', [tenantId]);
+      targetPipelineId = defaultPipeline.rows[0]?.id || 'sales';
+    }
+    if (stage) {
+      const stageCheck = await pool.query(
+        'SELECT 1 FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 AND id = $3',
+        [tenantId, targetPipelineId, stage]
+      );
+      if (stageCheck.rows.length === 0) {
+        return res.status(400).json({ error: `Stage "${stage}" does not belong to pipeline "${targetPipelineId}"` });
+      }
+    }
+
     const query = `
-      INSERT INTO deals (id, title, company, value, stage, probability, owner, lead_source, priority, contact_name, contact_email, created_at, expected_close_date, notes, tags, tenant_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      RETURNING id, title, company, value, stage, probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
+      INSERT INTO deals (id, title, company, value, stage, pipeline_id, probability, owner, lead_source, priority, contact_name, contact_email, created_at, expected_close_date, notes, tags, tenant_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
     `;
-    
+
     const result = await pool.query(query, [
-      id, title, company, parseInt(value || 0, 10), stage, parseInt(probability || 0, 10),
+      id, title, company, parseInt(value || 0, 10), stage, targetPipelineId, parseInt(probability || 0, 10),
       JSON.stringify(owner || {}), leadSource, priority, contactName, contactEmail,
       createdAt, expectedCloseDate || '', notes, JSON.stringify(tags || []), tenantId
     ]);
@@ -1360,6 +1367,10 @@ app.post('/api/deals', async (req, res) => {
       entityId: savedDeal.id,
       payload: { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage, priority: savedDeal.priority, leadSource: savedDeal.leadSource },
     }).catch((err) => console.error('runWorkflows (deal.created) error:', err.message));
+    dispatchWebhooks({
+      tenantId, eventType: 'deal.created', entityType: 'deal', entityId: savedDeal.id,
+      payload: { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage },
+    }).catch((err) => console.error('dispatchWebhooks (deal.created) error:', err.message));
 
     res.status(201).json(savedDeal);
   } catch (err) {
@@ -1374,11 +1385,24 @@ app.patch('/api/deals/:id/stage', async (req, res) => {
     const { stage, probability } = req.body;
     const tenantId = req.tenantId || req.user?.tenant_id || '';
 
+    // The target stage must belong to this deal's own pipeline — stage ids are only unique per
+    // (tenant, pipeline), so validate before writing rather than trusting the client's stage string.
+    const dealRow = await pool.query('SELECT pipeline_id AS "pipelineId" FROM deals WHERE id = $1', [id]);
+    if (dealRow.rows.length === 0) return res.status(404).json({ error: 'Deal not found' });
+    const pipelineId = dealRow.rows[0].pipelineId;
+    const stageRes = await pool.query(
+      'SELECT is_closed_won AS "isClosedWon" FROM pipeline_stages WHERE tenant_id = $1 AND pipeline_id = $2 AND id = $3',
+      [tenantId, pipelineId, stage]
+    );
+    if (stageRes.rows.length === 0) {
+      return res.status(400).json({ error: `Stage "${stage}" does not belong to this deal's pipeline` });
+    }
+
     const query = `
       UPDATE deals
       SET stage = $1, probability = $2
       WHERE id = $3
-      RETURNING id, title, company, value, stage, probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
+      RETURNING id, title, company, value, stage, pipeline_id AS "pipelineId", probability, owner, lead_source AS "leadSource", priority, contact_name AS "contactName", contact_email AS "contactEmail", created_at AS "createdAt", expected_close_date AS "expectedCloseDate", notes, tags
     `;
 
     const result = await pool.query(query, [stage, parseInt(probability, 10), id]);
@@ -1388,18 +1412,13 @@ app.patch('/api/deals/:id/stage', async (req, res) => {
     }
 
     const savedDeal = result.rows[0];
-    const stageRes = await pool.query(
-      'SELECT is_closed_won AS "isClosedWon" FROM pipeline_stages WHERE tenant_id = $1 AND id = $2',
-      [tenantId, stage]
-    );
     const isWon = stageRes.rows[0]?.isClosedWon === true;
-    runWorkflows({
-      tenantId,
-      eventType: isWon ? 'deal.won' : 'deal.stage_changed',
-      entityType: 'deal',
-      entityId: savedDeal.id,
-      payload: { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage, priority: savedDeal.priority, leadSource: savedDeal.leadSource },
-    }).catch((err) => console.error('runWorkflows (deal.stage) error:', err.message));
+    const eventType = isWon ? 'deal.won' : 'deal.stage_changed';
+    const eventPayload = { title: savedDeal.title, value: savedDeal.value, stage: savedDeal.stage, priority: savedDeal.priority, leadSource: savedDeal.leadSource };
+    runWorkflows({ tenantId, eventType, entityType: 'deal', entityId: savedDeal.id, payload: eventPayload })
+      .catch((err) => console.error('runWorkflows (deal.stage) error:', err.message));
+    dispatchWebhooks({ tenantId, eventType, entityType: 'deal', entityId: savedDeal.id, payload: eventPayload })
+      .catch((err) => console.error('dispatchWebhooks (deal.stage) error:', err.message));
 
     res.json(savedDeal);
   } catch (err) {
@@ -1676,6 +1695,252 @@ app.get('/api/workflows/:id/executions', async (req, res) => {
   }
 });
 
+// ===== Lead Scoring Rules =====
+app.get('/api/lead-scoring-rules', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, label, event_type AS "eventType", points, conditions, status
+       FROM lead_scoring_rules ORDER BY id ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching lead scoring rules:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/lead-scoring-rules', async (req, res) => {
+  try {
+    const { label, eventType, points, conditions, status } = req.body;
+    if (!label || !eventType || !VALID_TRIGGER_TYPES.includes(eventType)) {
+      return res.status(400).json({ error: `eventType must be one of: ${VALID_TRIGGER_TYPES.join(', ')}` });
+    }
+    const id = `LSR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const result = await pool.query(
+      `INSERT INTO lead_scoring_rules (id, tenant_id, label, event_type, points, conditions, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, label, event_type AS "eventType", points, conditions, status`,
+      [id, tenantId, label, eventType, parseInt(points, 10) || 0, JSON.stringify(Array.isArray(conditions) ? conditions : []), status || 'active']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating lead scoring rule:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/lead-scoring-rules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { label, points, conditions, status } = req.body;
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+    if (label !== undefined) { setClauses.push(`label = $${idx++}`); values.push(label); }
+    if (points !== undefined) { setClauses.push(`points = $${idx++}`); values.push(parseInt(points, 10) || 0); }
+    if (conditions !== undefined) { setClauses.push(`conditions = $${idx++}`); values.push(JSON.stringify(conditions)); }
+    if (status !== undefined) { setClauses.push(`status = $${idx++}`); values.push(status); }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE lead_scoring_rules SET ${setClauses.join(', ')} WHERE id = $${idx}
+       RETURNING id, label, event_type AS "eventType", points, conditions, status`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Rule not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating lead scoring rule:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/lead-scoring-rules/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM lead_scoring_rules WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Rule not found' });
+    res.json({ message: 'Rule deleted' });
+  } catch (err) {
+    console.error('Error deleting lead scoring rule:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Outbound Webhooks =====
+app.get('/api/webhooks', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, event_type AS "eventType", target_url AS "targetUrl", status,
+              (secret_encrypted <> '') AS "hasSecret"
+       FROM webhook_subscriptions ORDER BY id ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching webhooks:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/webhooks', async (req, res) => {
+  try {
+    const { name, eventType, targetUrl, secret } = req.body;
+    if (!name || !eventType || !targetUrl || !VALID_TRIGGER_TYPES.includes(eventType)) {
+      return res.status(400).json({ error: `name, targetUrl and a valid eventType (one of: ${VALID_TRIGGER_TYPES.join(', ')}) are required` });
+    }
+    try {
+      const parsed = new URL(targetUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('bad protocol');
+    } catch {
+      return res.status(400).json({ error: 'targetUrl must be a valid http(s) URL' });
+    }
+    const id = `WHS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const result = await pool.query(
+      `INSERT INTO webhook_subscriptions (id, tenant_id, name, event_type, target_url, secret_encrypted, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'active')
+       RETURNING id, name, event_type AS "eventType", target_url AS "targetUrl", status, (secret_encrypted <> '') AS "hasSecret"`,
+      [id, tenantId, name, eventType, targetUrl, secret ? encrypt(secret) : '']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating webhook:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/webhooks/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, status, secret } = req.body;
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+    if (name !== undefined) { setClauses.push(`name = $${idx++}`); values.push(name); }
+    if (status !== undefined) { setClauses.push(`status = $${idx++}`); values.push(status); }
+    if (secret !== undefined) { setClauses.push(`secret_encrypted = $${idx++}`); values.push(secret ? encrypt(secret) : ''); }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE webhook_subscriptions SET ${setClauses.join(', ')} WHERE id = $${idx}
+       RETURNING id, name, event_type AS "eventType", target_url AS "targetUrl", status, (secret_encrypted <> '') AS "hasSecret"`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Webhook not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating webhook:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/webhooks/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM webhook_subscriptions WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Webhook not found' });
+    res.json({ message: 'Webhook deleted' });
+  } catch (err) {
+    console.error('Error deleting webhook:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/webhooks/:id/deliveries', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, event_type AS "eventType", status, attempt_count AS "attemptCount",
+              last_status_code AS "lastStatusCode", last_error AS "lastError",
+              next_retry_at AS "nextRetryAt", created_at AS "createdAt"
+       FROM webhook_deliveries WHERE subscription_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching webhook deliveries:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/webhooks/:id/deliveries/:deliveryId/retry', async (req, res) => {
+  try {
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const result = await retryDelivery(tenantId, req.params.deliveryId);
+    if (!result) return res.status(404).json({ error: 'Delivery not found' });
+    res.json({ message: 'Retry attempted', ok: result.ok, statusCode: result.statusCode, error: result.error });
+  } catch (err) {
+    console.error('Error retrying webhook delivery:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== API Keys (Public API access) =====
+app.get('/api/api-keys', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, key_prefix AS "keyPrefix", scopes, status, last_used_at AS "lastUsedAt", created_at AS "createdAt"
+       FROM api_keys ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching API keys:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+const API_KEY_SCOPES = ['contacts:read', 'contacts:write', 'leads:read', 'leads:write', 'deals:read', 'deals:write', 'events:write'];
+
+app.post('/api/api-keys', async (req, res) => {
+  try {
+    const { name, scopes } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const safeScopes = Array.isArray(scopes) ? scopes.filter((s) => API_KEY_SCOPES.includes(s)) : [];
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const rawKey = `rf_live_${crypto.randomBytes(24).toString('hex')}`;
+    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    const keyPrefix = rawKey.slice(0, 16);
+    const id = `KEY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const result = await pool.query(
+      `INSERT INTO api_keys (id, tenant_id, name, key_prefix, key_hash, scopes, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+       RETURNING id, name, key_prefix AS "keyPrefix", scopes, status, created_at AS "createdAt"`,
+      [id, tenantId, name, keyPrefix, keyHash, JSON.stringify(safeScopes), req.user.sub]
+    );
+    // The raw key is only ever returned here — it's not recoverable from key_hash after this response.
+    res.status(201).json({ ...result.rows[0], key: rawKey });
+  } catch (err) {
+    console.error('Error creating API key:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/api-keys/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (status === undefined) return res.status(400).json({ error: 'No fields to update' });
+    const result = await pool.query(
+      `UPDATE api_keys SET status = $1 WHERE id = $2
+       RETURNING id, name, key_prefix AS "keyPrefix", scopes, status, created_at AS "createdAt"`,
+      [status, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'API key not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating API key:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/api-keys/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM api_keys WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'API key not found' });
+    res.json({ message: 'API key revoked' });
+  } catch (err) {
+    console.error('Error revoking API key:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ===== Notifications =====
 app.get('/api/notifications', async (req, res) => {
   try {
@@ -1792,13 +2057,12 @@ app.patch('/api/tasks/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Task not found' });
     const savedTask = result.rows[0];
     if (status === 'done') {
-      runWorkflows({
-        tenantId: req.tenantId || req.user?.tenant_id || '',
-        eventType: 'task.completed',
-        entityType: 'task',
-        entityId: savedTask.id,
-        payload: { title: savedTask.title, priority: savedTask.priority },
-      }).catch((err) => console.error('runWorkflows (task.completed) error:', err.message));
+      const taskTenantId = req.tenantId || req.user?.tenant_id || '';
+      const taskPayload = { title: savedTask.title, priority: savedTask.priority };
+      runWorkflows({ tenantId: taskTenantId, eventType: 'task.completed', entityType: 'task', entityId: savedTask.id, payload: taskPayload })
+        .catch((err) => console.error('runWorkflows (task.completed) error:', err.message));
+      dispatchWebhooks({ tenantId: taskTenantId, eventType: 'task.completed', entityType: 'task', entityId: savedTask.id, payload: taskPayload })
+        .catch((err) => console.error('dispatchWebhooks (task.completed) error:', err.message));
     }
     res.json(savedTask);
   } catch (err) {
@@ -1834,13 +2098,109 @@ app.get('/api/metrics', async (req, res) => {
   }
 });
 
+// ===== Pipelines =====
+app.get('/api/pipelines', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, is_default AS "isDefault", sort_order AS "sortOrder" FROM pipelines ORDER BY sort_order ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching pipelines:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/pipelines', async (req, res) => {
+  try {
+    const { id, name } = req.body;
+    if (!id || !name) return res.status(400).json({ error: 'id and name are required' });
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const maxOrder = await pool.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM pipelines');
+    const result = await pool.query(
+      `INSERT INTO pipelines (id, tenant_id, name, is_default, sort_order)
+       VALUES ($1, $2, $3, false, $4)
+       RETURNING id, name, is_default AS "isDefault", sort_order AS "sortOrder"`,
+      [id, tenantId, name, maxOrder.rows[0].m + 1]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A pipeline with this id already exists' });
+    console.error('Error creating pipeline:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/pipelines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, isDefault } = req.body;
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    if (isDefault === true) {
+      // Only one default pipeline per tenant — clear the others first.
+      await pool.query('UPDATE pipelines SET is_default = false WHERE tenant_id = $1', [tenantId]);
+    }
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+    if (name !== undefined) { setClauses.push(`name = $${idx++}`); values.push(name); }
+    if (isDefault !== undefined) { setClauses.push(`is_default = $${idx++}`); values.push(!!isDefault); }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE pipelines SET ${setClauses.join(', ')} WHERE id = $${idx}
+       RETURNING id, name, is_default AS "isDefault", sort_order AS "sortOrder"`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pipeline not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating pipeline:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/pipelines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.tenantId || req.user?.tenant_id || '';
+    const countRes = await pool.query('SELECT COUNT(*)::int AS c FROM pipelines');
+    if (countRes.rows[0].c <= 1) {
+      return res.status(409).json({ error: 'Cannot delete the only pipeline' });
+    }
+    const inUse = await pool.query('SELECT COUNT(*)::int AS c FROM deals WHERE pipeline_id = $1', [id]);
+    if (inUse.rows[0].c > 0) {
+      return res.status(409).json({ error: `Cannot delete: ${inUse.rows[0].c} deal(s) are currently in this pipeline` });
+    }
+    const result = await pool.query('DELETE FROM pipelines WHERE id = $1 RETURNING id, is_default AS "isDefault"', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pipeline not found' });
+    if (result.rows[0].isDefault) {
+      // The deleted pipeline was the default — promote whatever's left so the tenant always has one.
+      await pool.query(
+        `UPDATE pipelines SET is_default = true WHERE tenant_id = $1 AND id = (SELECT id FROM pipelines WHERE tenant_id = $1 ORDER BY sort_order ASC LIMIT 1)`,
+        [tenantId]
+      );
+    }
+    res.json({ message: 'Pipeline deleted' });
+  } catch (err) {
+    console.error('Error deleting pipeline:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ===== Pipeline Stages =====
 app.get('/api/stages', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"
-       FROM pipeline_stages ORDER BY sort_order ASC`
-    );
+    const { pipelineId } = req.query;
+    const params = [];
+    let query = `SELECT id, pipeline_id AS "pipelineId", label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"
+       FROM pipeline_stages`;
+    if (pipelineId) {
+      query += ' WHERE pipeline_id = $1';
+      params.push(pipelineId);
+    }
+    query += ' ORDER BY sort_order ASC';
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching stages:', err);
@@ -1851,18 +2211,23 @@ app.get('/api/stages', async (req, res) => {
 app.post('/api/stages', async (req, res) => {
   try {
     const { id, label, color, isClosedWon, isClosedLost } = req.body;
+    let { pipelineId } = req.body;
     if (!id || !label) return res.status(400).json({ error: 'id and label are required' });
     const tenantId = req.tenantId || req.user?.tenant_id || '';
-    const maxOrder = await pool.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM pipeline_stages');
+    if (!pipelineId) {
+      const defaultPipeline = await pool.query('SELECT id FROM pipelines WHERE tenant_id = $1 AND is_default = true LIMIT 1', [tenantId]);
+      pipelineId = defaultPipeline.rows[0]?.id || 'sales';
+    }
+    const maxOrder = await pool.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM pipeline_stages WHERE pipeline_id = $1', [pipelineId]);
     const result = await pool.query(
-      `INSERT INTO pipeline_stages (id, tenant_id, label, color, sort_order, is_closed_won, is_closed_lost)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
-      [id, tenantId, label, color || '#94a3b8', maxOrder.rows[0].m + 1, !!isClosedWon, !!isClosedLost]
+      `INSERT INTO pipeline_stages (id, tenant_id, pipeline_id, label, color, sort_order, is_closed_won, is_closed_lost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, pipeline_id AS "pipelineId", label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
+      [id, tenantId, pipelineId, label, color || '#94a3b8', maxOrder.rows[0].m + 1, !!isClosedWon, !!isClosedLost]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'A stage with this id already exists' });
+    if (err.code === '23505') return res.status(409).json({ error: 'A stage with this id already exists in this pipeline' });
     console.error('Error creating stage:', err);
     res.status(500).json({ error: 'Server error' });
   }
@@ -1871,7 +2236,7 @@ app.post('/api/stages', async (req, res) => {
 app.patch('/api/stages/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { label, color, sortOrder } = req.body;
+    const { label, color, sortOrder, pipelineId } = req.body;
     const setClauses = [];
     const values = [];
     let idx = 1;
@@ -1880,9 +2245,11 @@ app.patch('/api/stages/:id', async (req, res) => {
     if (sortOrder !== undefined) { setClauses.push(`sort_order = $${idx++}`); values.push(sortOrder); }
     if (setClauses.length === 0) return res.status(400).json({ error: 'No fields to update' });
     values.push(id);
+    let where = `id = $${idx}`;
+    if (pipelineId) { idx++; values.push(pipelineId); where += ` AND pipeline_id = $${idx}`; }
     const result = await pool.query(
-      `UPDATE pipeline_stages SET ${setClauses.join(', ')} WHERE id = $${idx}
-       RETURNING id, label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
+      `UPDATE pipeline_stages SET ${setClauses.join(', ')} WHERE ${where}
+       RETURNING id, pipeline_id AS "pipelineId", label, color, sort_order AS "sortOrder", is_closed_won AS "isClosedWon", is_closed_lost AS "isClosedLost"`,
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Stage not found' });
@@ -1896,11 +2263,20 @@ app.patch('/api/stages/:id', async (req, res) => {
 app.delete('/api/stages/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const inUse = await pool.query('SELECT COUNT(*)::int AS c FROM deals WHERE stage = $1', [id]);
+    const { pipelineId } = req.query;
+    const inUseParams = pipelineId ? [id, pipelineId] : [id];
+    const inUse = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM deals WHERE stage = $1${pipelineId ? ' AND pipeline_id = $2' : ''}`,
+      inUseParams
+    );
     if (inUse.rows[0].c > 0) {
       return res.status(409).json({ error: `Cannot delete: ${inUse.rows[0].c} deal(s) are currently in this stage` });
     }
-    const result = await pool.query('DELETE FROM pipeline_stages WHERE id = $1 RETURNING id', [id]);
+    const delParams = pipelineId ? [id, pipelineId] : [id];
+    const result = await pool.query(
+      `DELETE FROM pipeline_stages WHERE id = $1${pipelineId ? ' AND pipeline_id = $2' : ''} RETURNING id`,
+      delParams
+    );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Stage not found' });
     res.json({ message: 'Stage deleted' });
   } catch (err) {
@@ -2824,13 +3200,14 @@ app.post('/api/webhook/:platform', async (req, res) => {
         entityId: leadId,
       });
 
-      runWorkflows({
-        tenantId,
-        eventType: isNewLead ? 'lead.created' : 'lead.message_received',
-        entityType: 'lead',
-        entityId: leadId,
-        payload: { name: senderName, channel: platform, status: 'new', lastMessage: messageText },
-      }).catch((err) => console.error('runWorkflows (webhook) error:', err.message));
+      const leadEventType = isNewLead ? 'lead.created' : 'lead.message_received';
+      const leadEventPayload = { name: senderName, channel: platform, status: 'new', lastMessage: messageText };
+      runWorkflows({ tenantId, eventType: leadEventType, entityType: 'lead', entityId: leadId, payload: leadEventPayload })
+        .catch((err) => console.error('runWorkflows (webhook) error:', err.message));
+      applyLeadScoring({ tenantId, eventType: leadEventType, entityType: 'lead', entityId: leadId, payload: leadEventPayload })
+        .catch((err) => console.error('applyLeadScoring (webhook) error:', err.message));
+      dispatchWebhooks({ tenantId, eventType: leadEventType, entityType: 'lead', entityId: leadId, payload: leadEventPayload })
+        .catch((err) => console.error('dispatchWebhooks (webhook) error:', err.message));
 
       console.log(`Webhook: ${platform} message persisted for lead ${leadId}`);
     } catch (err) {
@@ -3061,13 +3438,13 @@ app.post('/api/leads/:id/allocate', async (req, res) => {
       entityId: leadId,
     });
 
-    runWorkflows({
-      tenantId: tenantIdForAlloc,
-      eventType: 'lead.allocated',
-      entityType: 'lead',
-      entityId: leadId,
-      payload: { assignedTo: salesPersonId },
-    }).catch((err) => console.error('runWorkflows (allocate) error:', err.message));
+    const allocPayload = { assignedTo: salesPersonId };
+    runWorkflows({ tenantId: tenantIdForAlloc, eventType: 'lead.allocated', entityType: 'lead', entityId: leadId, payload: allocPayload })
+      .catch((err) => console.error('runWorkflows (allocate) error:', err.message));
+    applyLeadScoring({ tenantId: tenantIdForAlloc, eventType: 'lead.allocated', entityType: 'lead', entityId: leadId, payload: allocPayload })
+      .catch((err) => console.error('applyLeadScoring (allocate) error:', err.message));
+    dispatchWebhooks({ tenantId: tenantIdForAlloc, eventType: 'lead.allocated', entityType: 'lead', entityId: leadId, payload: allocPayload })
+      .catch((err) => console.error('dispatchWebhooks (allocate) error:', err.message));
 
     res.status(201).json(insertResult.rows[0]);
   } catch (err) {

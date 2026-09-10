@@ -170,6 +170,48 @@ const SCHEMAS = [
     color: { type: 'string', maxLength: 20 },
   }],
 
+  // ── Pipelines (Multiple Pipelines) ──
+  [/^POST \/api\/pipelines$/, {
+    id: { required: true, type: 'string', maxLength: 50, pattern: /^[a-zA-Z0-9_-]+$/ },
+    name: { required: true, type: 'string', maxLength: 100 },
+  }],
+  [/^PATCH \/api\/pipelines\/[^/]+$/, {
+    name: { type: 'string', maxLength: 100 },
+    isDefault: { type: 'boolean' },
+  }],
+
+  // ── Lead Scoring Rules ──
+  [/^POST \/api\/lead-scoring-rules$/, {
+    label: { required: true, type: 'string', maxLength: 150 },
+    eventType: { required: true, type: 'string', maxLength: 50 },
+    points: { required: true, type: 'number' },
+  }],
+  [/^PATCH \/api\/lead-scoring-rules\/[^/]+$/, {
+    label: { type: 'string', maxLength: 150 },
+    points: { type: 'number' },
+    status: { type: 'string', oneOf: ['active', 'paused'] },
+  }],
+
+  // ── Outbound Webhooks ──
+  [/^POST \/api\/webhooks$/, {
+    name: { required: true, type: 'string', maxLength: 150 },
+    eventType: { required: true, type: 'string', maxLength: 50 },
+    targetUrl: { required: true, type: 'string', maxLength: 2000 },
+  }],
+  [/^PATCH \/api\/webhooks\/[^/]+$/, {
+    name: { type: 'string', maxLength: 150 },
+    status: { type: 'string', oneOf: ['active', 'paused'] },
+  }],
+
+  // ── API Keys ──
+  [/^POST \/api\/api-keys$/, {
+    name: { required: true, type: 'string', maxLength: 150 },
+    scopes: { type: 'array' },
+  }],
+  [/^PATCH \/api\/api-keys\/[^/]+$/, {
+    status: { required: true, type: 'string', oneOf: ['active', 'revoked'] },
+  }],
+
   // ── Leads (Unified Inbox) ──
   [/^PATCH \/api\/leads\/[^/]+$/, {
     assignedTo: { type: 'string', maxLength: 50 },
