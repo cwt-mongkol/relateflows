@@ -5,6 +5,7 @@ import { useGoogleLogin } from '@react-oauth/google';
 import { Shield, Users, Briefcase, Headphones, MessageCircle, Globe, BarChart3, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
 const LINE_CLIENT_ID = import.meta.env.VITE_LINE_CLIENT_ID || '';
+const GOOGLE_CONFIGURED = !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 // Build LINE OAuth URL dynamically so redirect_uri always matches current origin
 function buildLineLoginUrl(): string {
@@ -208,8 +209,9 @@ export const LoginPage: React.FC = () => {
           <div className="space-y-3.5">
             {/* Google Login — custom styled button */}
             <button
-              onClick={() => googleLogin()}
-              disabled={isLoading}
+              onClick={() => { if (GOOGLE_CONFIGURED) googleLogin(); else alert('Google Sign-In is not configured.'); }}
+              disabled={isLoading || !GOOGLE_CONFIGURED}
+              title={GOOGLE_CONFIGURED ? undefined : 'Google Sign-In is not configured'}
               className="btn-lift w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
             >
               {isLoading ? (
