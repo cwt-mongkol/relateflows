@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ToastProvider } from './context/ToastContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { PWAUpdateNotice } from './components/PWAUpdateNotice'
 import './index.css'
 import App from './App.tsx'
 
@@ -15,6 +16,7 @@ createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
       <GoogleOAuthProvider clientId={googleClientId}>
         <ToastProvider>
+          <PWAUpdateNotice />
           <AuthProvider>
             <SettingsProvider>
               <App />
